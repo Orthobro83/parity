@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+}
+
+// Release signing key, kept out of git (see PROGRESS.md). Without it, release builds fall back to
+// the debug key so anyone can build from source.
+val releaseSigning = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
 }
 
 android {
@@ -8,13 +16,12 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        // Placeholder ID for the Phase 1 sideloaded build. Decide the final ID before the first
-        // Play Store upload; after that it can never change.
+        // Decide the final ID before the first Play Store upload; after that it can never change.
         applicationId = "app.parity"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0-beta.1"
     }
 
     // One APK per CPU type: ML Kit, translation and Tesseract ship large native libraries, so a
@@ -28,13 +35,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (!releaseSigning.isEmpty) {
+            create("release") {
+                storeFile = rootProject.file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideloaded personal build: sign with the debug key until a release key exists.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

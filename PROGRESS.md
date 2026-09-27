@@ -83,6 +83,18 @@ whether Python may accept incoming connections, allow it.
 
 Alternative over USB: `adb install -r androidApp/build/outputs/apk/release/androidApp-arm64-v8a-release.apk`.
 
+## Releases (GitHub)
+
+- Public repo: https://github.com/Orthobro83/parity. Releases carry the per-ABI APKs.
+- Release builds are signed with `signing/parity-release.p12`; its passwords are in
+  `keystore.properties`. **Both are git-ignored and exist only on this Mac, so back them up**
+  (e.g. in a password manager). Without them, no update can ever be installed over an existing
+  install. Signing certificate SHA-256:
+  `89791c7d8123a8d9fab2810e6bab773eb42fb0bc0cd51bd9d9a6c5e26a1b6303`.
+- To cut a release: bump `versionCode`/`versionName` in androidApp/build.gradle.kts, run
+  `./gradlew :core:jvmTest :androidApp:assembleRelease`, then create a tag and a GitHub release
+  with the APKs (see the v0.3.0-beta.1 release for the notes format).
+
 ## Next step
 
 See the first unchecked item above. Also worth doing next:
