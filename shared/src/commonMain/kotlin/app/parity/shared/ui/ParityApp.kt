@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.ListPayload
+import app.parity.shared.data.RestoreMode
 import app.parity.shared.data.Settings
 import app.parity.shared.ui.screens.AnalyticsScreen
 import app.parity.shared.ui.screens.HistoryScreen
@@ -55,9 +56,11 @@ import app.parity.shared.ui.screens.ImportListDialog
 import app.parity.shared.ui.screens.ListScreen
 import app.parity.shared.ui.screens.OnboardingScreen
 import app.parity.shared.ui.screens.ReceiveScreen
+import app.parity.shared.ui.screens.RestoreDialog
 import app.parity.shared.ui.screens.SendScreen
 import app.parity.shared.ui.screens.SessionDetailScreen
 import app.parity.shared.ui.screens.SettingsScreen
+import app.parity.shared.ui.screens.UnlockDialog
 import app.parity.shared.ui.theme.Parity
 import app.parity.shared.ui.theme.ParityTheme
 
@@ -93,6 +96,8 @@ private fun MainShell(graph: AppGraph, settings: Settings) {
     val receiving by graph.transfer.receiving.collectAsState()
     val detail by graph.history.detail.collectAsState()
     val pendingImport by graph.transfer.pendingImport.collectAsState()
+    val pendingSealed by graph.transfer.pendingSealed.collectAsState()
+    val pendingBackup by graph.transfer.pendingBackup.collectAsState()
 
     LaunchedEffect(Unit) {
         graph.messages.flow.collect { message ->
@@ -138,6 +143,16 @@ private fun MainShell(graph: AppGraph, settings: Settings) {
             onMerge = { graph.transfer.importList(merge = true); tab = Tab.LIST },
             onNewList = { graph.transfer.importList(merge = false); tab = Tab.LIST },
             onDismiss = graph.transfer::dismissImport,
+        )
+    }
+
+    if (pendingSealed != null) UnlockDialog(graph)
+    pendingBackup?.let { contents ->
+        RestoreDialog(
+            summary = contents.summary,
+            onMerge = { graph.transfer.restoreBackup(RestoreMode.MERGE) },
+            onReplace = { graph.transfer.restoreBackup(RestoreMode.REPLACE_ALL) },
+            onDismiss = graph.transfer::dismissBackup,
         )
     }
 

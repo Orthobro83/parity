@@ -2,18 +2,26 @@ package app.parity.shared.app
 
 import app.parity.core.transfer.QrReassembler
 import app.parity.core.transfer.QrTransfer
+import app.parity.core.transfer.PassphraseBox
+import app.parity.core.transfer.deflate
+import app.parity.core.transfer.inflate
+import app.parity.shared.data.BackupContents
+import app.parity.shared.data.BackupPayload
 import app.parity.shared.data.ListPayload
+import app.parity.shared.data.RestoreMode
 import app.parity.shared.data.TransferPayload
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
-/** What the sender screen shows: the codes to cycle through and a title. */
-data class SendState(val title: String, val codes: List<String>)
+/** What the sender screen shows: the codes to cycle through, a title, and the unlock code if encrypted. */
+data class SendState(val title: String, val codes: List<String>, val passcode: String? = null)
 
 data class ReceiveState(
     val received: Set<Int> = emptySet(),
@@ -40,6 +48,14 @@ class TransferController(private val graph: AppGraph) {
     private val _pendingImport = MutableStateFlow<TransferPayload?>(null)
     val pendingImport: StateFlow<TransferPayload?> = _pendingImport
 
+    /** An encrypted transfer waiting for the code from the sending phone. */
+    private val _pendingSealed = MutableStateFlow<ByteArray?>(null)
+    val pendingSealed: StateFlow<ByteArray?> = _pendingSealed
+
+    /** A decrypted backup waiting for Merge or Replace all. */
+    private val _pendingBackup = MutableStateFlow<BackupContents?>(null)
+    val pendingBackup: StateFlow<BackupContents?> = _pendingBackup
+
     /** Fires when a transfer completes, so the receiver leaves scan mode and returns Home. */
     private val _completed = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val completed: SharedFlow<Unit> = _completed
@@ -52,6 +68,19 @@ class TransferController(private val graph: AppGraph) {
             val payload: TransferPayload = graph.lists.toPayload(listId)
             val bytes = json.encodeToString(TransferPayload.serializer(), payload).encodeToByteArray()
             _send.value = SendState((payload as ListPayload).name, QrTransfer.encode(bytes))
+        }
+    }
+
+    /** Everything, encrypted with a code shown on this screen and typed on the other phone (design §8.5). */
+    fun sendBackup() {
+        graph.scope.launch {
+            val code = PassphraseBox.newCode()
+            val codes = withContext(Dispatchers.Default) {
+                val payload: TransferPayload = BackupPayload(files = graph.backup.exportFiles())
+                val bytes = json.encodeToString(TransferPayload.serializer(), payload).encodeToByteArray()
+                QrTransfer.encode(PassphraseBox.seal(deflate(bytes), code), encrypted = true)
+            }
+            _send.value = SendState("All Parity data", codes, passcode = code)
         }
     }
 
@@ -105,21 +134,56 @@ class TransferController(private val graph: AppGraph) {
                 graph.messages.show("That transfer didn't check out. Keep the codes in view to try again.")
             }
             is QrReassembler.Event.Complete -> {
-                val payload = runCatching {
-                    json.decodeFromString(TransferPayload.serializer(), event.payload.decodeToString())
-                }.getOrNull()
                 graph.platform.haptics.success()
                 _receiving.value = false
                 reassembler.reset()
                 _receive.value = ReceiveState()
-                if (payload == null || event.encrypted) {
-                    graph.messages.show("Received a Parity code this version can't read.")
+                if (event.encrypted) {
+                    _pendingSealed.value = event.payload
                 } else {
-                    _pendingImport.value = payload
+                    accept(event.payload)
                 }
                 _completed.tryEmit(Unit)
             }
         }
+    }
+
+    private fun accept(bytes: ByteArray) {
+        val payload = runCatching { json.decodeFromString(TransferPayload.serializer(), bytes.decodeToString()) }.getOrNull()
+        when (payload) {
+            is ListPayload -> _pendingImport.value = payload
+            is BackupPayload -> runCatching { graph.backup.read(payload.files) }
+                .onSuccess { _pendingBackup.value = it }
+                .onFailure { graph.messages.show(it.message ?: "That backup couldn't be read.") }
+            null -> graph.messages.show("Received a Parity code this version can't read.")
+        }
+    }
+
+    /** Decrypts a received transfer with the code from the other phone. Returns false for a wrong code. */
+    suspend fun unlock(code: String): Boolean {
+        val sealed = _pendingSealed.value ?: return false
+        val opened = withContext(Dispatchers.Default) { PassphraseBox.open(sealed, code)?.let(::inflate) } ?: return false
+        _pendingSealed.value = null
+        accept(opened)
+        return true
+    }
+
+    fun dismissSealed() {
+        _pendingSealed.value = null
+    }
+
+    fun restoreBackup(mode: RestoreMode) {
+        val contents = _pendingBackup.value ?: return
+        _pendingBackup.value = null
+        graph.scope.launch {
+            runCatching { graph.backup.restore(contents, mode) }
+                .onSuccess { graph.messages.show("Restored: ${contents.summary}") }
+                .onFailure { graph.messages.show("Restore failed; nothing was changed. ${it.message ?: ""}") }
+        }
+    }
+
+    fun dismissBackup() {
+        _pendingBackup.value = null
     }
 
     /** Imports a received list: merged into the current list, or as a new one (design §8.4). */

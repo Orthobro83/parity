@@ -7,6 +7,7 @@ import app.parity.core.list.ListMatcher
 import app.parity.core.list.ShoppingListText
 import app.parity.core.transfer.Base45
 import app.parity.core.transfer.Crc32
+import app.parity.core.transfer.PassphraseBox
 import app.parity.core.transfer.QrReassembler
 import app.parity.core.transfer.QrTransfer
 import app.parity.core.transfer.Sha256
@@ -152,5 +153,17 @@ class CsvTest {
         val files = unzip(archive)
         assertEquals(setOf("a.csv", "manifest.json"), files.keys)
         assertEquals("{}", files.getValue("manifest.json").decodeToString())
+    }
+}
+
+class PassphraseBoxTest {
+    @Test
+    fun sealsAndOpensWithTheRightCodeOnly() {
+        val code = PassphraseBox.newCode()
+        assertTrue(Regex("[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}").matches(code), code)
+        val secret = "all my shopping data".encodeToByteArray()
+        val sealed = PassphraseBox.seal(secret, code)
+        assertContentEquals(secret, PassphraseBox.open(sealed, code.lowercase().replace("-", " ")))
+        assertNull(PassphraseBox.open(sealed, "0000-0000-0000"))
     }
 }

@@ -1,7 +1,10 @@
 package app.parity.core
 
+import app.parity.core.transfer.PassphraseBox
 import app.parity.core.transfer.QrReassembler
 import app.parity.core.transfer.QrTransfer
+import app.parity.core.transfer.deflate
+import app.parity.core.transfer.inflate
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
@@ -50,6 +53,20 @@ class QrRoundTripTest {
             last = reassembler.accept(read)
         }
         assertContentEquals(payload, assertIs<QrReassembler.Event.Complete>(last).payload)
+    }
+
+    @Test
+    fun encryptedBackupSurvivesQrAndOpensWithTheCode() {
+        val backup = ("stores.csv,products.csv,price_observations.csv\n" + "row,".repeat(2_000)).encodeToByteArray()
+        val code = PassphraseBox.newCode()
+        val codes = QrTransfer.encode(PassphraseBox.seal(deflate(backup), code), encrypted = true)
+        val reassembler = QrReassembler()
+        var last: QrReassembler.Event? = null
+        codes.reversed().forEach { last = reassembler.accept(throughQr(it)) }
+        val complete = assertIs<QrReassembler.Event.Complete>(last)
+        kotlin.test.assertTrue(complete.encrypted)
+        assertContentEquals(backup, inflate(PassphraseBox.open(complete.payload, code)!!))
+        kotlin.test.assertNull(PassphraseBox.open(complete.payload, "AAAA-AAAA-AAAA"))
     }
 
     @Test

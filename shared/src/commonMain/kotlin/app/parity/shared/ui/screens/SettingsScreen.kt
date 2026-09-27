@@ -178,7 +178,8 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
         Group {
             SettingRow("Export all data", "ZIP of CSV files, saved where you choose") { controller.exportZip() }
             SettingRow("Restore from backup", "Replace everything or merge a backup ZIP") { controller.pickRestoreFile() }
-            SettingRow("Receive a list by QR", "Scan codes shown on another phone") { graph.transfer.startReceiving() }
+            SettingRow("Send all data by QR", "Encrypted; the other phone types the code shown with it") { graph.transfer.sendBackup() }
+            SettingRow("Receive by QR", "A list or all data, from another phone") { graph.transfer.startReceiving() }
         }
 
         SectionHeader("About")

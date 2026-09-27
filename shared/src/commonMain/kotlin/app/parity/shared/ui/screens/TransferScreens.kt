@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +31,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,8 +41,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.parity.core.transfer.PassphraseBox
 import app.parity.shared.app.AppGraph
 import app.parity.shared.app.SendState
 import app.parity.shared.data.ListPayload
@@ -48,6 +54,7 @@ import app.parity.shared.ui.components.PillButton
 import app.parity.shared.ui.components.RoundIconButton
 import app.parity.shared.ui.theme.Parity
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Sender (design §8.5): one static code for "1 of 1", otherwise cycles 1→N at ~8 fps until closed
@@ -76,6 +83,11 @@ fun SendScreen(state: SendState, encoder: QrEncoder, onClose: () -> Unit) {
             )
             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(state.title, style = Parity.type.headline, color = Color(0xFF0B0D10))
+                state.passcode?.let { code ->
+                    Spacer(Modifier.height(8.dp))
+                    Text("Code for the other phone", style = Parity.type.caption, color = Color(0xFF4A5260))
+                    Text(code, style = Parity.type.headline.copy(fontFeatureSettings = "tnum", letterSpacing = androidx.compose.ui.unit.TextUnit(2f, androidx.compose.ui.unit.TextUnitType.Sp)), color = Color(0xFF0B0D10))
+                }
                 Spacer(Modifier.height(20.dp))
                 val matrix = matrices[index]
                 Canvas(Modifier.fillMaxWidth().aspectRatio(1f)) {
@@ -93,7 +105,7 @@ fun SendScreen(state: SendState, encoder: QrEncoder, onClose: () -> Unit) {
                     style = Parity.type.title, color = Color(0xFF0B0D10),
                 )
                 Text(
-                    "On the other phone: Parity → List → scan icon.",
+                    "On the other phone, open Parity and point its camera here.",
                     style = Parity.type.caption, color = Color(0xFF4A5260), textAlign = TextAlign.Center,
                 )
             }
@@ -190,6 +202,78 @@ fun ImportListDialog(payload: ListPayload, onMerge: () -> Unit, onNewList: () ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PillButton("Merge", onMerge, primary = false)
                 PillButton("New list", onNewList, height = 44.dp)
+            }
+        },
+        dismissButton = { PillButton("Cancel", onDismiss, primary = false) },
+    )
+}
+
+/** Asks for the code shown on the sending phone and decrypts the transfer. */
+@Composable
+fun UnlockDialog(graph: AppGraph) {
+    var code by remember { mutableStateOf("") }
+    var wrong by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = graph.transfer::dismissSealed,
+        containerColor = Parity.colors.surfaceRaised,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text("Enter the code", style = Parity.type.headline) },
+        text = {
+            Column {
+                Text("Type the code shown above the QR codes on the other phone.", style = Parity.type.body)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it.take(20); wrong = false },
+                    singleLine = true,
+                    placeholder = { Text("XXXX-XXXX-XXXX") },
+                    isError = wrong,
+                    supportingText = { if (wrong) Text("That code doesn't open this transfer.") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = parityTextFieldColors(),
+                )
+            }
+        },
+        confirmButton = {
+            PillButton(
+                if (busy) "Unlocking…" else "Unlock",
+                {
+                    busy = true
+                    scope.launch {
+                        wrong = !graph.transfer.unlock(code)
+                        busy = false
+                    }
+                },
+                height = 44.dp,
+                enabled = !busy && PassphraseBox.isValidCode(code),
+            )
+        },
+        dismissButton = { PillButton("Cancel", graph.transfer::dismissSealed, primary = false) },
+    )
+}
+
+/** Merge or replace with a backup received by QR (design §15). */
+@Composable
+fun RestoreDialog(summary: String, onMerge: () -> Unit, onReplace: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Parity.colors.surfaceRaised,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text("Restore received data?", style = Parity.type.headline) },
+        text = {
+            Column {
+                Text(summary, style = Parity.type.body)
+                Spacer(Modifier.height(8.dp))
+                Text("Merge keeps your data and adds anything new. Replace all deletes everything first.", style = Parity.type.caption, color = Parity.colors.textSecondary)
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton("Replace all", onReplace, primary = false, destructive = true)
+                PillButton("Merge", onMerge, height = 44.dp)
             }
         },
         dismissButton = { PillButton("Cancel", onDismiss, primary = false) },

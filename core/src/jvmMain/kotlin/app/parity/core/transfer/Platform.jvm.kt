@@ -8,6 +8,11 @@ import java.util.zip.Inflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 actual fun deflate(data: ByteArray): ByteArray {
     val deflater = Deflater(Deflater.BEST_COMPRESSION, true)
@@ -70,3 +75,24 @@ actual fun unzip(archive: ByteArray): Map<String, ByteArray> {
 private val secureRandom = SecureRandom()
 
 actual fun secureRandomBytes(size: Int): ByteArray = ByteArray(size).also(secureRandom::nextBytes)
+
+actual fun pbkdf2Sha256(password: CharArray, salt: ByteArray, iterations: Int, keyBytes: Int): ByteArray {
+    val spec = PBEKeySpec(password, salt, iterations, keyBytes * 8)
+    try {
+        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    } finally {
+        spec.clearPassword()
+    }
+}
+
+actual fun aesGcmEncrypt(key: ByteArray, iv: ByteArray, plaintext: ByteArray): ByteArray {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+    return cipher.doFinal(plaintext)
+}
+
+actual fun aesGcmDecrypt(key: ByteArray, iv: ByteArray, ciphertext: ByteArray): ByteArray? = runCatching {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+    cipher.doFinal(ciphertext)
+}.getOrNull()
