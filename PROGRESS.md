@@ -28,9 +28,9 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 - [x] core: money + currency catalog
 - [x] core: price-tag parser + sale detector + stabilizer (+ tests)
 - [x] core: FX indicator (+ tests)
-- [ ] core: shopping-list parser + classifier (+ tests)
-- [ ] core: QR frame codec, base45 (+ tests)
-- [ ] core: CSV/ZIP export model (+ tests)
+- [x] core: shopping-list parser + classifier + purchase matcher (+ tests)
+- [x] core: QR frame codec ("i of N"), base45, CRC-32, SHA-256, reassembler (+ tests)
+- [x] core: CSV codec + ZIP (+ tests)
 - [ ] shared: Room entities/DAOs, repositories
 - [ ] shared: rate providers + cache + pivots
 - [ ] shared: theme (dark, Source Sans 3, pills), navigation shell
