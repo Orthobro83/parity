@@ -105,6 +105,13 @@ class HomeController(private val graph: AppGraph) {
         scope.launch(Dispatchers.Default) {
             frames.collect { frame -> process(frame) }
         }
+        // Fetch the translation model for the local language before the first scan needs it.
+        scope.launch {
+            graph.settings.collect { settings ->
+                val label = Languages.labelLanguageFor(settings?.country) ?: return@collect
+                if (label != settings?.language) runCatching { graph.platform.text.prepare(label, settings!!.language) }
+            }
+        }
     }
 
     /** Called from the camera's analysis thread. */

@@ -20,6 +20,11 @@ class LocationController(private val graph: AppGraph) {
 
     private var job: Job? = null
 
+    init {
+        // Check again as soon as location access is granted.
+        graph.scope.launch { graph.platform.permissions.location.collect { granted -> if (granted) refresh() } }
+    }
+
     fun refresh() {
         if (job?.isActive == true) return
         job = graph.scope.launch {

@@ -56,6 +56,9 @@ interface TextServices {
 
     /** Translates on-device; downloads the language model if needed and allowed. Null on failure. */
     suspend fun translate(text: String, from: String, to: String): String?
+
+    /** Downloads the translation model ahead of time (on Wi-Fi), e.g. when arriving in a new country. */
+    suspend fun prepare(from: String, to: String)
 }
 
 data class LocationFix(val countryCode: String?, val lat: Double?, val lng: Double?)
