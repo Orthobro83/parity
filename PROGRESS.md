@@ -67,14 +67,18 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 
 ## Install on a phone (Phase 1, sideloaded)
 
-1. On the phone: Settings → About phone → tap "Build number" 7 times, then Settings → System →
-   Developer options → turn on USB debugging. Connect the phone by USB and accept the prompt.
-2. Build and install:
-   ```bash
-   ./gradlew :androidApp:assembleRelease
-   adb install -r androidApp/build/outputs/apk/release/androidApp-arm64-v8a-release.apk
-   ```
-   Or copy that APK to the phone and open it (allow "Install unknown apps" for your file manager).
+Serve the APK on the local network and open the page on the phone (same Wi-Fi):
+
+```bash
+./gradlew :androidApp:assembleRelease
+python3 tools/serve_apk.py        # prints e.g. http://192.168.1.254:8420/
+```
+
+Tap the download, open the file, and allow "Install unknown apps" for the browser if asked.
+Installing a newer build over an older one keeps the data (same signing key). If macOS asks
+whether Python may accept incoming connections, allow it.
+
+Alternative over USB: `adb install -r androidApp/build/outputs/apk/release/androidApp-arm64-v8a-release.apk`.
 
 ## Next step
 
