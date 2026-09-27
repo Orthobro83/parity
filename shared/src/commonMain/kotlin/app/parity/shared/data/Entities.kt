@@ -3,10 +3,12 @@ package app.parity.shared.data
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 // Tables from design §13. IDs are UUID strings so CSV restores can merge without collisions.
 // Money and rates are stored as decimal strings (never floating point).
 
+@Serializable
 @Entity(tableName = "settings")
 data class SettingsEntity(
     @PrimaryKey val id: Int = 1,
@@ -21,6 +23,7 @@ data class SettingsEntity(
     val onboarded: Boolean,
 )
 
+@Serializable
 @Entity(tableName = "store")
 data class StoreEntity(
     @PrimaryKey val id: String,
@@ -31,6 +34,7 @@ data class StoreEntity(
     val createdAt: Long,
 )
 
+@Serializable
 @Entity(
     tableName = "product",
     indices = [Index("barcode"), Index("normalizedName"), Index("storeId")],
@@ -52,6 +56,7 @@ data class ProductEntity(
     val displayName: String? get() = userEditedName ?: translatedName ?: originalName
 }
 
+@Serializable
 @Entity(
     tableName = "price_observation",
     indices = [Index("productId"), Index("observedAt"), Index("sessionId")],
@@ -79,6 +84,7 @@ data class PriceObservationEntity(
     val fxPivot: String?,
 )
 
+@Serializable
 @Entity(tableName = "cart_line")
 data class CartLineEntity(
     @PrimaryKey val id: String,
@@ -87,6 +93,7 @@ data class CartLineEntity(
     val addedAt: Long,
 )
 
+@Serializable
 @Entity(tableName = "shopping_session", indices = [Index("finalizedAt")])
 data class ShoppingSessionEntity(
     @PrimaryKey val id: String,
@@ -100,6 +107,7 @@ data class ShoppingSessionEntity(
     val totalsLocalJson: String,
 )
 
+@Serializable
 @Entity(tableName = "purchase_line", indices = [Index("sessionId"), Index("productId")])
 data class PurchaseLineEntity(
     @PrimaryKey val id: String,
@@ -117,6 +125,7 @@ data class PurchaseLineEntity(
     val nameTranslatedAtPurchase: String?,
 )
 
+@Serializable
 @Entity(tableName = "shopping_list")
 data class ShoppingListEntity(
     @PrimaryKey val id: String,
@@ -124,6 +133,7 @@ data class ShoppingListEntity(
     val createdAt: Long,
 )
 
+@Serializable
 @Entity(tableName = "shopping_list_item", indices = [Index("listId")])
 data class ShoppingListItemEntity(
     @PrimaryKey val id: String,
@@ -137,12 +147,14 @@ data class ShoppingListItemEntity(
     val createdAt: Long,
 )
 
+@Serializable
 @Entity(tableName = "user_category_override")
 data class CategoryOverrideEntity(
     @PrimaryKey val normalizedText: String,
     val category: String,
 )
 
+@Serializable
 @Entity(tableName = "rate_cache", primaryKeys = ["base", "quote", "provider"])
 data class RateCacheEntity(
     val base: String,
