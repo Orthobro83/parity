@@ -38,9 +38,14 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 - [x] shared: Home (camera, total bar, result card, quantity/cart sheets, finalize dialog, list strip, manual entry)
 - [x] shared: List, History (+ detail), Analytics (Phase 1 summary), Settings, Onboarding, QR send/receive
 - [x] androidApp: CameraX + ML Kit OCR/barcode, Tesseract names, ML Kit translation, location, SAF files, ZXing, haptics
-- [ ] Emulator smoke test (launch, onboarding, manual price, cart, finalize, history, list, QR send screen)
+- [x] Emulator smoke test (Pixel_4a API 33): onboarding, manual price, live USD→GEL rate, cart, finalize
+      warning, history + detail, list classification + green strikethrough, QR send/receive screens,
+      ▲/▼ indicator (+0.189 % after switching to CoinGecko), analytics
+- [x] Scan a photo (Home → photo icon); used to verify Georgian OCR on the emulator with synthetic tags:
+      Tesseract reads ხაჭაპური იმერული / არაჟანი სოფლის 20% exactly; ML Kit translates on-device;
+      superscript tetri (4⁴⁹ ₾ → 4.49) and sale tags (-20 %, was 12.49) parse correctly
 - [ ] Real-device test on a phone (camera OCR, Georgian names) — needs the user's phone over USB
-- [ ] Georgian OCR golden set: photos of real Georgian tags, measure parser + Tesseract accuracy
+- [ ] Georgian OCR on real photos (synthetic tags pass; real tags have glare, fonts, angles) — needs the phone
 - [ ] M4: encrypted backup over QR (passphrase, design §8.5) — list sharing by QR already works
 - [ ] M5 (after Phase 1): full analytics charts
 - [ ] Release build check (R8 keep rules for Tesseract/ML Kit/Room)
