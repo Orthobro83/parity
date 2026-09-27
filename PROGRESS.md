@@ -24,10 +24,10 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ## Status
 
 - [x] M0 scaffold: Gradle (AGP 9.4.1, Kotlin 2.4.20, Compose MP 1.12.1), three modules, debug APK builds
-- [ ] M0 assets: Source Sans 3 fonts, tessdata (`kat`, `eng`, `rus`)
-- [ ] core: money + currency catalog
-- [ ] core: price-tag parser + sale detector (+ tests)
-- [ ] core: FX indicator (+ tests)
+- [x] M0 assets: Source Sans 3 fonts, tessdata (`kat`, `eng`, `rus`)
+- [x] core: money + currency catalog
+- [x] core: price-tag parser + sale detector + stabilizer (+ tests)
+- [x] core: FX indicator (+ tests)
 - [ ] core: shopping-list parser + classifier (+ tests)
 - [ ] core: QR frame codec, base45 (+ tests)
 - [ ] core: CSV/ZIP export model (+ tests)
