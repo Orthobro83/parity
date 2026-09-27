@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FlashlightOff
 import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -143,6 +144,8 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
                     background = Parity.colors.glass,
                 )
                 Spacer(Modifier.width(8.dp))
+                RoundIconButton(Icons.Rounded.PhotoLibrary, "Scan a photo", home::scanPhoto, background = Parity.colors.glass)
+                Spacer(Modifier.width(8.dp))
                 RoundIconButton(Icons.Rounded.Keyboard, "Type a price", { manualEntry = true }, background = Parity.colors.glass)
             }
             AnimatedVisibility(banner != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
@@ -159,6 +162,19 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
             }
 
             Spacer(Modifier.weight(1f))
+
+            AnimatedVisibility(card == null && summary == null && cameraGranted, enter = fadeIn(), exit = fadeOut()) {
+                Box(Modifier.fillMaxWidth().padding(bottom = 24.dp), contentAlignment = Alignment.Center) {
+                    GlassPanel(shape = CircleShape) {
+                        Text(
+                            "Point at a price tag",
+                            style = Parity.type.label,
+                            color = Parity.colors.textSecondary,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+            }
 
             AnimatedVisibility(
                 visible = card != null,
@@ -226,7 +242,6 @@ private fun TotalBar(summary: CartSummary?, settings: Settings, modifier: Modifi
                 Text("  ⇄  ", style = Parity.type.label, color = c.textSecondary)
                 Text(settings.localCurrency.code, style = Parity.type.label, color = c.textPrimary)
                 Spacer(Modifier.weight(1f))
-                Text("Point at a price tag", style = Parity.type.caption, color = c.textSecondary, maxLines = 1)
             } else {
                 RollingText(MoneyFormat.format(summary.totalBase, summary.baseCurrency), Parity.type.price, c.textPrimary)
                 Spacer(Modifier.width(8.dp))

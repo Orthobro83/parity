@@ -2,6 +2,7 @@ package app.parity.android.platform
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.os.SystemClock
@@ -24,6 +25,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
 import app.parity.core.scan.Box
 import app.parity.core.scan.OcrElement
 import app.parity.core.scan.OcrFrame
@@ -37,9 +39,13 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import androidx.camera.core.Preview as CameraPreview
@@ -66,8 +72,14 @@ class CameraScannerImpl(
     }
     private val executor = Executors.newSingleThreadExecutor()
 
-    @Volatile private var lastFrame: Bitmap? = null
-    @Volatile private var lastRotation = 0
+    /** Recent camera frames and scanned photos by frame id, so a region is re-read from the right image. */
+    private val frames = object : LinkedHashMap<Long, Pair<Bitmap, Int>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Pair<Bitmap, Int>>?) = size > 12
+    }
+    private val photos = object : LinkedHashMap<Long, Bitmap>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Bitmap>?) = size > 2
+    }
+    private val nextFrameId = AtomicLong(1)
     @Volatile private var camera: Camera? = null
 
     @Composable
@@ -154,8 +166,8 @@ class CameraScannerImpl(
                 return
             }
 
-            lastFrame = bitmap
-            lastRotation = rotation
+            val frameId = nextFrameId.getAndIncrement()
+            synchronized(frames) { frames[frameId] = bitmap to rotation }
             val textTask = textRecognizer.process(input)
             val barcodeTask = tagBarcodes.process(input)
             val text = runCatching { Tasks.await(textTask) }.getOrNull()
@@ -176,7 +188,7 @@ class CameraScannerImpl(
                     )
                 }
             }
-            onFrame.value(OcrFrame(lines, width, height, productCodes))
+            onFrame.value(OcrFrame(lines, width, height, productCodes, frameId))
         }
     }
 
@@ -185,9 +197,9 @@ class CameraScannerImpl(
         future.addListener({ runCatching { future.get() }.onSuccess(cont::resume).onFailure(cont::resumeWithException) }, ContextCompat.getMainExecutor(context))
     }
 
-    override suspend fun readRegion(region: Box, languages: String): String? {
-        val frame = lastFrame ?: return null
-        val rotation = lastRotation
+    override suspend fun readRegion(frameId: Long, region: Box, languages: String): String? {
+        val photo = synchronized(photos) { photos[frameId] }
+        val (frame, rotation) = photo?.let { it to 0 } ?: synchronized(frames) { frames[frameId] } ?: return null
         val upright = if (rotation == 0) frame else {
             Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
         }
@@ -198,6 +210,43 @@ class CameraScannerImpl(
         if (right - left < 8 || bottom - top < 8) return null
         val crop = Bitmap.createBitmap(upright, left, top, right - left, bottom - top)
         return tesseract.read(crop, languages)
+    }
+
+    override suspend fun scanImage(bytes: ByteArray): OcrFrame? = withContext(Dispatchers.Default) {
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext null
+        val bitmap = upright(decoded, bytes)
+        val frameId = nextFrameId.getAndIncrement()
+        synchronized(photos) { photos[frameId] = bitmap }
+        val input = InputImage.fromBitmap(bitmap, 0)
+        val text = runCatching { textRecognizer.process(input).awaitResult() }.getOrNull()
+        val barcodes = runCatching { tagBarcodes.process(input).awaitResult() }.getOrNull().orEmpty()
+        OcrFrame(
+            lines = text?.textBlocks.orEmpty().flatMap { block ->
+                block.lines.mapNotNull { line ->
+                    val box = line.boundingBox ?: return@mapNotNull null
+                    OcrLine(line.text, box.toBox(), line.elements.mapNotNull { e -> e.boundingBox?.let { OcrElement(e.text, it.toBox()) } })
+                }
+            },
+            width = bitmap.width,
+            height = bitmap.height,
+            barcodes = barcodes.filter { it.format != Barcode.FORMAT_QR_CODE }.mapNotNull { it.rawValue },
+            id = frameId,
+        )
+    }
+
+    /** Photos from the gallery carry their orientation in EXIF; rotate so text is upright. */
+    private fun upright(bitmap: Bitmap, bytes: ByteArray): Bitmap {
+        val orientation = runCatching {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val degrees = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        if (degrees == 0f) return bitmap
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postRotate(degrees) }, true)
     }
 
     override fun setTorch(on: Boolean) {

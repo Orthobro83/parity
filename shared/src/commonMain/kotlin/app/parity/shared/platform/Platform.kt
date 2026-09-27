@@ -40,14 +40,17 @@ interface CameraScanner {
     )
 
     /**
-     * Re-reads [region] of the most recent frame with a script-specific OCR engine (Tesseract),
-     * for names in scripts the fast recognizer can't read, such as Georgian. [languages] are
-     * Tesseract codes, e.g. "kat+eng".
+     * Re-reads [region] of frame [frameId] with a script-specific OCR engine (Tesseract), for names
+     * in scripts the fast recognizer can't read, such as Georgian. [languages] are Tesseract codes,
+     * e.g. "kat+eng". Returns null when that frame is no longer kept.
      */
-    suspend fun readRegion(region: Box, languages: String): String?
+    suspend fun readRegion(frameId: Long, region: Box, languages: String): String?
 
     /** Turns the torch on or off, for dim store aisles. */
     fun setTorch(on: Boolean)
+
+    /** Reads a photo (JPEG/PNG bytes) like a camera frame; it then backs [readRegion]. */
+    suspend fun scanImage(bytes: ByteArray): OcrFrame?
 }
 
 interface TextServices {

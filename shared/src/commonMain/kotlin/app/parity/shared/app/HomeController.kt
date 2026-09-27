@@ -8,6 +8,7 @@ import app.parity.core.money.MoneyFormat
 import app.parity.core.money.decimal
 import app.parity.core.money.toPlain
 import app.parity.core.scan.Box
+import app.parity.core.scan.NameText
 import app.parity.core.scan.OcrFrame
 import app.parity.core.scan.ParsedTag
 import app.parity.core.scan.PriceCandidate
@@ -20,6 +21,8 @@ import app.parity.shared.data.ProductEntity
 import app.parity.shared.data.Settings
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -155,8 +158,8 @@ class HomeController(private val graph: AppGraph) {
             localPrice = price.amount,
             localCurrency = local,
             baseCurrency = settings.baseCurrency,
-            name = tag.name,
-            originalName = tag.name,
+            name = tag.name.takeIf { latinLabels(settings) },
+            originalName = tag.name.takeIf { latinLabels(settings) },
             isPromo = tag.isPromo,
             regularPrice = tag.regularPrice,
             alternatives = tag.alternatives.map { it.amount },
@@ -173,11 +176,13 @@ class HomeController(private val graph: AppGraph) {
     }
 
     /** Rate, name (Tesseract for scripts ML Kit can't read), product identity, ▲/▼, translation. */
-    private suspend fun enrich(cardId: Long, tag: ParsedTag, settings: Settings, local: CurrencyCode, record: Boolean) {
+    private suspend fun enrich(cardId: Long, tag: ParsedTag, settings: Settings, local: CurrencyCode, record: Boolean) = coroutineScope {
+        // Read the name while the rate is fetched; the frame must still be in the camera's cache.
+        val name = async { resolveName(tag, settings) }
         val rateResult = graph.rates.rate(settings.baseCurrency, local, settings.rateProvider, settings.rateApiKey)
         update(cardId) { it.copy(rate = rateResult.rate, rateStale = rateResult.stale, rateLoading = false) }
 
-        val originalName = resolveName(tag, settings)
+        val originalName = name.await()
         update(cardId) {
             it.copy(
                 originalName = originalName,
@@ -187,12 +192,12 @@ class HomeController(private val graph: AppGraph) {
         }
         if (!record) {
             update(cardId) { it.copy(nameStatus = if (originalName == null) NameStatus.NONE else NameStatus.DONE) }
-            return
+            return@coroutineScope
         }
 
         val store = graph.shopping.storeFor(graph.location.lastFix.value)
         var product = graph.shopping.identifyProduct(tag.barcode, originalName, store?.id)
-        val card = _card.value?.takeIf { it.id == cardId } ?: return
+        val card = _card.value?.takeIf { it.id == cardId } ?: return@coroutineScope
         val observation = graph.shopping.recordObservation(
             product = product, store = store, countryCode = settings.country, localCurrency = local,
             price = card.localPrice, regularPrice = card.regularPrice, isPromo = card.isPromo,
@@ -226,19 +231,22 @@ class HomeController(private val graph: AppGraph) {
             else -> null
         }
         val region = tag.nameRegion
-        if (tesseract != null && region != null) {
-            val read = withTimeoutOrNull(6_000) {
-                runCatching { graph.platform.camera.readRegion(region, tesseract) }.getOrNull()
+        if (tesseract != null) {
+            // The Latin recognizer turns other scripts into gibberish, so don't fall back to it.
+            if (region == null) return null
+            val read = withTimeoutOrNull(8_000) {
+                runCatching { graph.platform.camera.readRegion(tag.frameId, region, tesseract) }.getOrNull()
             }
-            cleanName(read)?.let { return it }
+            return NameText.pickLines(read, labelLanguage)
         }
         return cleanName(tag.name)
     }
 
-    private fun cleanName(raw: String?): String? {
-        val lines = raw?.lines()?.map { it.trim() }?.filter { line -> line.count { it.isLetter() } >= 3 } ?: return null
-        return lines.take(2).joinToString(" ").replace(Regex("\\s+"), " ").trim().takeIf { it.length >= 3 }
-    }
+    /** True when shelf labels here are in a script the fast (Latin) recognizer reads. */
+    private fun latinLabels(settings: Settings): Boolean =
+        Languages.labelLanguageFor(settings.country) !in setOf("ka", "ru", "uk", "be", "hy", "el", "he", "th", "zh", "ja", "ko")
+
+    private fun cleanName(raw: String?): String? = NameText.pickLines(raw, null)
 
     private suspend fun translateIfNeeded(product: ProductEntity, settings: Settings): ProductEntity {
         val original = product.originalName ?: return product
@@ -328,6 +336,22 @@ class HomeController(private val graph: AppGraph) {
         val tag = ParsedTag.EMPTY.copy(price = candidate, name = name?.trim()?.ifEmpty { null })
         stabilizer.reset()
         show(tag, settings)
+    }
+
+    /** Picks a photo of a price tag and reads it like a camera frame. */
+    fun scanPhoto() {
+        val settings = graph.settings.value ?: return
+        scope.launch {
+            val bytes = graph.platform.files.open(listOf("image/*")) ?: return@launch
+            val frame = graph.platform.camera.scanImage(bytes)
+            val tag = frame?.let { withContext(Dispatchers.Default) { PriceTagParser.parse(it, settings.localCurrency) } }
+            if (tag?.price == null) {
+                graph.messages.show("No price found in that photo")
+                return@launch
+            }
+            stabilizer.reset()
+            show(tag, settings)
+        }
     }
 
     // --- Cart (design §7) -------------------------------------------------------------------------

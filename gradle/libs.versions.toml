@@ -20,6 +20,7 @@ mlkit-langid = "17.0.6"
 mlkit-translate = "17.0.3"
 play-location = "21.4.0"
 zxing = "3.5.4"
+exifinterface = "1.4.2"
 tesseract4android = "4.9.0"
 
 [libraries]
@@ -53,6 +54,7 @@ mlkit-langid = { module = "com.google.mlkit:language-id", version.ref = "mlkit-l
 mlkit-translate = { module = "com.google.mlkit:translate", version.ref = "mlkit-translate" }
 play-location = { module = "com.google.android.gms:play-services-location", version.ref = "play-location" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+androidx-exifinterface = { module = "androidx.exifinterface:exifinterface", version.ref = "exifinterface" }
 tesseract4android = { module = "cz.adaptech.tesseract4android:tesseract4android", version.ref = "tesseract4android" }
 
 [plugins]

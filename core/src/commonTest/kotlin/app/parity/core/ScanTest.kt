@@ -5,6 +5,7 @@ import app.parity.core.money.decimal
 import app.parity.core.money.toPlain
 import app.parity.core.scan.AmountParser
 import app.parity.core.scan.Box
+import app.parity.core.scan.NameText
 import app.parity.core.scan.Names
 import app.parity.core.scan.OcrElement
 import app.parity.core.scan.OcrFrame
@@ -194,5 +195,21 @@ class StabilizerAndNamesTest {
     @Test
     fun decimalsHelper() {
         assertEquals("2.5", decimal("2.50").toPlain())
+    }
+}
+
+class NameTextTest {
+    @Test
+    fun keepsLinesInTheLabelScript() {
+        assertEquals("ხაჭაპური იმერული", NameText.pickLines("ხაჭაპური იმერული\nAQ ar", "ka"))
+        assertEquals("ყავა Jacobs Monarch 95გ", NameText.pickLines("ყავა Jacobs Monarch 95გ", "ka"))
+        assertEquals("რძე სოფლის 3.2% 1 ლიტრი", NameText.pickLines("==.\nრძე სოფლის 3.2%\n1 ლიტრი", "ka"))
+        assertNull(NameText.pickLines("==.\nAQ ar", "ka"))
+    }
+
+    @Test
+    fun latinNamesNeedRealWords() {
+        assertEquals("Greek Yogurt 16 oz", NameText.pickLines("Greek Yogurt 16 oz", null))
+        assertNull(NameText.pickLines("AQ ar\n4 49", null))
     }
 }

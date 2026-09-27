@@ -60,5 +60,6 @@ dependencies {
     implementation(libs.mlkit.translate)
     implementation(libs.play.location)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.tesseract4android)
 }

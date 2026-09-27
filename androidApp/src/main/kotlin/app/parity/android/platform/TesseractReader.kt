@@ -7,6 +7,8 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import com.googlecode.tesseract.android.TessBaseAPI
+import android.os.SystemClock
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,6 +19,8 @@ import java.io.File
  * Tesseract for product names in scripts ML Kit can't read, such as Georgian (design §14).
  * Model files ship in assets/tessdata and are copied to app storage on first use.
  */
+private const val TAG = "ParityOcr"
+
 class TesseractReader(private val context: Context) {
     private val mutex = Mutex()
     private var api: TessBaseAPI? = null
@@ -25,11 +29,18 @@ class TesseractReader(private val context: Context) {
 
     suspend fun read(bitmap: Bitmap, languages: String): String? = withContext(Dispatchers.Default) {
         mutex.withLock {
+            val started = SystemClock.elapsedRealtime()
             val tess = engineFor(languages) ?: return@withLock null
+            val ready = SystemClock.elapsedRealtime()
             val prepared = prepare(bitmap)
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                runCatching { File(context.cacheDir, "ocr_last.png").outputStream().use { prepared.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+            }
             try {
                 tess.setImage(prepared)
-                tess.getUTF8Text()?.trim()?.takeIf { it.isNotEmpty() }
+                tess.getUTF8Text()?.trim()?.takeIf { it.isNotEmpty() }.also {
+                    Log.d(TAG, "read ${prepared.width}x${prepared.height} in ${SystemClock.elapsedRealtime() - ready} ms (init ${ready - started} ms): $it")
+                }
             } finally {
                 tess.clear()
                 if (prepared !== bitmap) prepared.recycle()

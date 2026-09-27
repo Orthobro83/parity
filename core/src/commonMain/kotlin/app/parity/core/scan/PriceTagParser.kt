@@ -31,6 +31,8 @@ data class ParsedTag(
     /** Area likely to contain the product name, for re-reading with a script-specific OCR engine. */
     val nameRegion: Box?,
     val barcode: String?,
+    /** [OcrFrame.id] of the frame this was read from. */
+    val frameId: Long = 0,
 ) {
     /** Currency printed on the tag, or null when the tag shows no currency (assume local). */
     val printedCurrency: CurrencyCode? get() = price?.currency
@@ -55,7 +57,7 @@ object PriceTagParser {
 
         val barcode = frame.barcodes.firstOrNull()
         if (candidates.isEmpty()) {
-            return ParsedTag.EMPTY.copy(barcode = barcode, promoSignals = emptyList())
+            return ParsedTag.EMPTY.copy(barcode = barcode, frameId = frame.id)
         }
 
         val maxHeight = candidates.maxOf { it.box.height }.coerceAtLeast(1f)
@@ -103,6 +105,7 @@ object PriceTagParser {
             nameBox = name?.second,
             nameRegion = chosen?.let { nameRegion(it, name?.second, frame) },
             barcode = barcode,
+            frameId = frame.id,
         )
     }
 

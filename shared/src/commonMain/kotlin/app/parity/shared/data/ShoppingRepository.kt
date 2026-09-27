@@ -95,8 +95,17 @@ class ShoppingRepository(private val db: ParityDatabase) {
                 .filter { it.second >= 0.92 }
                 .maxByOrNull { it.second }?.first
             if (fuzzy != null) {
-                if (barcode != null && fuzzy.barcode == null) products.upsert(fuzzy.copy(barcode = barcode))
-                return fuzzy.copy(barcode = fuzzy.barcode ?: barcode)
+                var matched = fuzzy.copy(barcode = fuzzy.barcode ?: barcode)
+                // A slightly different reading of the same product: keep the latest one and
+                // translate it afresh (a name the user typed still wins).
+                if (fuzzy.normalizedName != normalized) {
+                    matched = matched.copy(
+                        originalName = originalName?.trim(), normalizedName = normalized,
+                        translatedName = null, translatedLang = null,
+                    )
+                }
+                if (matched != fuzzy) products.upsert(matched)
+                return matched
             }
         }
         val product = ProductEntity(

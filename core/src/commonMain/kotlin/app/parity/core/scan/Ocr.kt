@@ -31,4 +31,6 @@ data class OcrFrame(
     val width: Int,
     val height: Int,
     val barcodes: List<String> = emptyList(),
+    /** Identifies the image this frame came from, so a region can be re-read from that exact image. */
+    val id: Long = 0,
 )
