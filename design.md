@@ -312,6 +312,34 @@ Matching is done in order of preference:
 
 ---
 
+### 7.1 Multi-buy deals (added in 0.2.0)
+
+Stores often price a single unit and add a deal for several: "from 3, ₾7.99 each" next to a
+₾9.99 regular price, "3 for ₾20", "1+1", "2+1", "2nd at 50 % off", "2/$5".
+
+- **Detection.** The parser recognizes deal wording in English, Georgian ("3 ცალის ყიდვისას",
+  "აქცია 1+1") and Russian ("от 3 шт. по 79.90", "2 по цене 1"). The deal price is never taken
+  for the regular price, even when it is printed larger. A price below the regular one is read as a
+  per-unit deal price; a price between the regular price and N × regular is a bundle total. A plain
+  pack size ("Eggs 10 pcs") is not a deal.
+- **Georgian tags.** The fast recognizer can't read Georgian script, so once a price locks,
+  Tesseract re-reads the area around it; that second pass finds deal wording, Georgian sale words
+  and the product name (skipping promotion banners such as "აქცია 1+1").
+- **Not a sale.** A deal leaves the single-unit price unchanged, so deal wording alone doesn't mark
+  the scan as a sale; price tracking keeps using the regular price (§10).
+- **At Buy.** The quantity sheet asks: "Just 1 at the regular price" or "N with the deal", each
+  with both currencies and the saving, plus "Another quantity…" (a stepper with a deal toggle).
+- **Cart and History.** Each line stores whether the deal was chosen. The effective unit price, the
+  exact line total, the regular unit price and the deal are saved with the purchase and shown in
+  History ("3 × $3.07 (₾7.99) · Deal: 3+ at ₾7.99 each · regular ₾9.99") and in `purchases.csv`.
+- **Corrections.** The DEAL chip on the result card adds, edits or removes a deal the camera
+  missed; manual price entry has optional deal fields.
+- **Data.** Schema v2 adds `price_observation.multiBuyJson`, `cart_line.multiBuy`, and
+  `purchase_line.regularUnitPriceLocal`, `multiBuyJson`, `lineTotalLocal` (automatic migration from
+  v1; existing data is kept).
+
+---
+
 ## 8. Shopping list
 
 ### 8.1 Entry

@@ -15,7 +15,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 RELEASE = ROOT / "androidApp/build/outputs/apk/release"
-VERSION = "0.1.0"
+
+
+def app_version() -> str:
+    """versionName from androidApp/build.gradle.kts."""
+    import re
+    text = (ROOT / "androidApp/build.gradle.kts").read_text(encoding="utf-8")
+    match = re.search(r'versionName\s*=\s*"([^"]+)"', text)
+    return match.group(1) if match else "dev"
+
+
+VERSION = app_version()
 ABIS = [
     ("arm64-v8a", "Most phones (2017 and newer)"),
     ("armeabi-v7a", "Older 32-bit phones"),

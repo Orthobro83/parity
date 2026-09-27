@@ -71,7 +71,13 @@ internal object Lexicon {
         "statt", "au lieu de", "antes", "prima",
     )
 
-    val promoPhrases = listOf("% off", "1+1", "2+1", "2 for", "3 for 2", "ახალი ფასი", "новая цена", "now only")
+    val promoPhrases = listOf("% off", "ახალი ფასი", "новая цена", "now only")
+
+    /** Words right after an integer that make it a deal quantity ("3 for", "3 pcs"), not a price. */
+    val quantitySuffixes = listOf("+", "for", "pcs", "pieces", "pc", "шт", "за", "pour", "für", "por", "or", "и", "ცალ", "/")
+
+    /** Words right before an integer that make it a deal quantity ("buy 3", "from 3"). */
+    val quantityPrefixes = setOf("buy", "from", "ab", "от", "desde", "покупке", "+")
 
     /** Lines made only of these words are never product names. */
     val boilerplate = setOf(

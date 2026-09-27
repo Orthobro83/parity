@@ -97,9 +97,11 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
     var finalizeItems by remember { mutableStateOf<List<String>?>(null) }
     var editingName by remember { mutableStateOf<ScanCard?>(null) }
     var fxDetail by remember { mutableStateOf<ScanCard?>(null) }
+    var editingDeal by remember { mutableStateOf<ScanCard?>(null) }
     var torch by remember { mutableStateOf(false) }
 
-    val overlay = showCart || buying != null || manualEntry || finalizeItems != null || editingName != null || fxDetail != null
+    val overlay = showCart || buying != null || manualEntry || finalizeItems != null || editingName != null ||
+        fxDetail != null || editingDeal != null
     LaunchedEffect(overlay) { home.paused.value = overlay }
     LaunchedEffect(cameraGranted) { if (!cameraGranted) graph.platform.permissions.requestCamera() }
     // Re-check the country every 5 minutes while scanning (design §5).
@@ -134,18 +136,19 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
 
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TotalBar(summary, settings, Modifier.weight(1f)) { if (summary != null) showCart = true }
-                Spacer(Modifier.width(8.dp))
+            TotalBar(summary, settings, Modifier.fillMaxWidth()) { if (summary != null) showCart = true }
+            // Camera controls in a column on the right, so the totals keep the full width.
+            Column(
+                Modifier.align(Alignment.End).padding(top = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 RoundIconButton(
                     icon = if (torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
                     contentDescription = if (torch) "Turn torch off" else "Turn torch on",
                     onClick = { torch = !torch; graph.platform.camera.setTorch(torch) },
                     background = Parity.colors.glass,
                 )
-                Spacer(Modifier.width(8.dp))
                 RoundIconButton(Icons.Rounded.PhotoLibrary, "Scan a photo", home::scanPhoto, background = Parity.colors.glass)
-                Spacer(Modifier.width(8.dp))
                 RoundIconButton(Icons.Rounded.Keyboard, "Type a price", { manualEntry = true }, background = Parity.colors.glass)
             }
             AnimatedVisibility(banner != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
@@ -192,6 +195,7 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
                         onEditName = { editingName = c },
                         onFxDetail = { fxDetail = c },
                         onCurrency = home::chooseCurrency,
+                        onDeal = { editingDeal = c },
                     )
                 }
             }
@@ -217,12 +221,18 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
     buying?.let { c ->
         QuantitySheet(
             card = c,
-            onAdd = { qty -> home.buy(qty); buying = null },
+            onAdd = { qty, useDeal -> home.buy(qty, useDeal); buying = null },
             onDismiss = { buying = null },
         )
     }
     if (showCart) CartSheet(graph, settings, onDismiss = { showCart = false })
-    if (manualEntry) ManualEntrySheet(settings, onShow = { price, name -> home.manualEntry(price, name); manualEntry = false }, onDismiss = { manualEntry = false })
+    if (manualEntry) {
+        ManualEntrySheet(settings, onShow = { price, name, deal -> home.manualEntry(price, name, deal); manualEntry = false }, onDismiss = { manualEntry = false })
+    }
+    editingDeal?.let { c ->
+        // The card may have changed (e.g. its observation was recorded) since the dialog opened.
+        DealDialog(home.card.value ?: c, onSave = { home.setMultiBuy(it); editingDeal = null }, onDismiss = { editingDeal = null })
+    }
     finalizeItems?.let { open ->
         FinalizeDialog(open, onKeepShopping = { finalizeItems = null }, onFinalize = { home.finalize(); finalizeItems = null })
     }
@@ -248,11 +258,22 @@ private fun TotalBar(summary: CartSummary?, settings: Settings, modifier: Modifi
                 val local = summary.localTotals[settings.localCurrency] ?: summary.localTotals.values.firstOrNull()
                 val localCode = if (summary.localTotals.containsKey(settings.localCurrency)) settings.localCurrency else summary.localTotals.keys.firstOrNull()
                 if (local != null && localCode != null && localCode != summary.baseCurrency) {
-                    Text("(${MoneyFormat.format(local, localCode)})", style = Parity.type.priceSmall, color = c.textSecondary, maxLines = 1)
+                    Text(
+                        "(${MoneyFormat.format(local, localCode)})",
+                        style = Parity.type.priceSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
-                Spacer(Modifier.weight(1f))
-                Text("${summary.count} ${if (summary.count == 1) "item" else "items"}", style = Parity.type.label, color = c.textSecondary)
-                Icon(Icons.Rounded.ExpandMore, contentDescription = "Open cart", tint = c.textSecondary)
+                // Item count as a small badge so the two totals keep the room.
+                Box(
+                    Modifier.clip(CircleShape).background(c.surfaceRaised).padding(horizontal = 8.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("${summary.count}", style = Parity.type.label, color = c.textPrimary)
+                }
+                Icon(Icons.Rounded.ExpandMore, contentDescription = "Open cart, ${summary.count} items", tint = c.textSecondary)
             }
         }
     }
@@ -268,6 +289,7 @@ private fun ResultCard(
     onEditName: () -> Unit,
     onFxDetail: () -> Unit,
     onCurrency: (CurrencyCode) -> Unit,
+    onDeal: () -> Unit,
 ) {
     val c = Parity.colors
     GlassPanel(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
@@ -289,6 +311,14 @@ private fun ResultCard(
                     }
                 }
                 card.indicator?.let { FxBadge(it, onClick = onFxDetail) }
+            }
+            card.multiBuy?.let { deal ->
+                val each = deal.dealUnitPrice(card.localPrice)
+                val eachBase = card.rate?.localToBase(each)?.takeIf { card.baseCurrency != card.localCurrency }
+                Text(
+                    "Deal: ${deal.describe(card.localCurrency)}" + (eachBase?.let { " → ${MoneyFormat.format(it, card.baseCurrency)} each" } ?: ""),
+                    style = Parity.type.label, color = c.accent, modifier = Modifier.padding(top = 4.dp),
+                )
             }
             if (card.rateStale && card.rate != null) {
                 Text("Rate from ${formatAge(card.rate.fetchedAtMs, now())} (offline)", style = Parity.type.caption, color = c.sale)
@@ -315,6 +345,9 @@ private fun ResultCard(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Chip("SALE", color = c.sale, selected = card.isPromo, onClick = onToggleSale)
+                }
+                item {
+                    Chip(if (card.multiBuy != null) "DEAL" else "+ Deal", color = c.accent, selected = card.multiBuy != null, onClick = onDeal)
                 }
                 card.regularPrice?.let { regular ->
                     item { Chip("was ${MoneyFormat.format(regular, card.localCurrency)}", color = c.textSecondary) }

@@ -31,6 +31,7 @@ class PriceStabilizer(private val requiredFrames: Int = 3) {
             promoSignals = recent.flatMap { it.promoSignals }.distinct(),
             regularPrice = recent.firstNotNullOfOrNull { it.regularPrice },
             barcode = recent.firstNotNullOfOrNull { it.barcode },
+            multiBuy = recent.lastOrNull { it.multiBuy != null }?.multiBuy,
         )
         locked = stable
         return stable

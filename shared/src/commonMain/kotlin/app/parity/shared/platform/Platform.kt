@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import app.parity.core.scan.Box
 import app.parity.core.scan.OcrFrame
+import app.parity.core.scan.OcrLine
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -45,6 +46,12 @@ interface CameraScanner {
      * e.g. "kat+eng". Returns null when that frame is no longer kept.
      */
     suspend fun readRegion(frameId: Long, region: Box, languages: String): String?
+
+    /**
+     * Reads the text lines, with their boxes in frame coordinates, in [region] of frame [frameId]
+     * using the script-specific engine. Used for a second pass over tags in scripts like Georgian.
+     */
+    suspend fun readLines(frameId: Long, region: Box, languages: String): List<OcrLine>?
 
     /** Turns the torch on or off, for dim store aisles. */
     fun setTorch(on: Boolean)

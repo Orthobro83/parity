@@ -2,8 +2,8 @@ package app.parity.core.scan
 
 /** Picks the product name: the most name-like text near the price, preferring lines above it. */
 internal object NameFinder {
-    fun find(frame: OcrFrame, price: PriceCandidate?): Pair<String, Box>? {
-        val usable = frame.lines.withIndex().filter { (_, line) -> isNameLike(line, price) }
+    fun find(frame: OcrFrame, price: PriceCandidate?, exclude: Set<Int> = emptySet()): Pair<String, Box>? {
+        val usable = frame.lines.withIndex().filter { (index, line) -> index !in exclude && isNameLike(line, price) }
         if (usable.isEmpty()) return null
 
         val scored = usable.map { (_, line) ->

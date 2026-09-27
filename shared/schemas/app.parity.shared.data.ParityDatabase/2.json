@@ -1,0 +1,785 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "055a9a8aa1e7bf0008aa385f12446ccf",
+    "entities": [
+      {
+        "tableName": "settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `baseCurrency` TEXT NOT NULL, `language` TEXT NOT NULL, `localCurrencyOverride` TEXT, `manualCountry` TEXT, `detectedCountry` TEXT, `rateProvider` TEXT NOT NULL, `rateApiKey` TEXT, `trueBlack` INTEGER NOT NULL, `onboarded` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baseCurrency",
+            "columnName": "baseCurrency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "language",
+            "columnName": "language",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localCurrencyOverride",
+            "columnName": "localCurrencyOverride",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "manualCountry",
+            "columnName": "manualCountry",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "detectedCountry",
+            "columnName": "detectedCountry",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rateProvider",
+            "columnName": "rateProvider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rateApiKey",
+            "columnName": "rateApiKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "trueBlack",
+            "columnName": "trueBlack",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "onboarded",
+            "columnName": "onboarded",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "store",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `lat` REAL, `lng` REAL, `countryCode` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "lng",
+            "columnName": "lng",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "countryCode",
+            "columnName": "countryCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "product",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `barcode` TEXT, `originalName` TEXT, `normalizedName` TEXT, `originalLang` TEXT, `translatedName` TEXT, `translatedLang` TEXT, `userEditedName` TEXT, `category` TEXT, `storeId` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "barcode",
+            "columnName": "barcode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "originalName",
+            "columnName": "originalName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "normalizedName",
+            "columnName": "normalizedName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "originalLang",
+            "columnName": "originalLang",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "translatedName",
+            "columnName": "translatedName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "translatedLang",
+            "columnName": "translatedLang",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "userEditedName",
+            "columnName": "userEditedName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "storeId",
+            "columnName": "storeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_product_barcode",
+            "unique": false,
+            "columnNames": [
+              "barcode"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_product_barcode` ON `${TABLE_NAME}` (`barcode`)"
+          },
+          {
+            "name": "index_product_normalizedName",
+            "unique": false,
+            "columnNames": [
+              "normalizedName"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_product_normalizedName` ON `${TABLE_NAME}` (`normalizedName`)"
+          },
+          {
+            "name": "index_product_storeId",
+            "unique": false,
+            "columnNames": [
+              "storeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_product_storeId` ON `${TABLE_NAME}` (`storeId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "price_observation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `productId` TEXT NOT NULL, `storeId` TEXT, `sessionId` TEXT, `observedAt` INTEGER NOT NULL, `countryCode` TEXT, `localCurrency` TEXT NOT NULL, `price` TEXT NOT NULL, `regularPrice` TEXT, `isPromo` INTEGER NOT NULL, `promoSource` TEXT NOT NULL, `baseCurrency` TEXT NOT NULL, `fxRate` TEXT, `fxRateAt` INTEGER, `fxFetchedAt` INTEGER, `fxProvider` TEXT, `fxPivot` TEXT, `multiBuyJson` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "productId",
+            "columnName": "productId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "storeId",
+            "columnName": "storeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "observedAt",
+            "columnName": "observedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "countryCode",
+            "columnName": "countryCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localCurrency",
+            "columnName": "localCurrency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "price",
+            "columnName": "price",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "regularPrice",
+            "columnName": "regularPrice",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isPromo",
+            "columnName": "isPromo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "promoSource",
+            "columnName": "promoSource",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baseCurrency",
+            "columnName": "baseCurrency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fxRate",
+            "columnName": "fxRate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fxRateAt",
+            "columnName": "fxRateAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fxFetchedAt",
+            "columnName": "fxFetchedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fxProvider",
+            "columnName": "fxProvider",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fxPivot",
+            "columnName": "fxPivot",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "multiBuyJson",
+            "columnName": "multiBuyJson",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_price_observation_productId",
+            "unique": false,
+            "columnNames": [
+              "productId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_price_observation_productId` ON `${TABLE_NAME}` (`productId`)"
+          },
+          {
+            "name": "index_price_observation_observedAt",
+            "unique": false,
+            "columnNames": [
+              "observedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_price_observation_observedAt` ON `${TABLE_NAME}` (`observedAt`)"
+          },
+          {
+            "name": "index_price_observation_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_price_observation_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cart_line",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `observationId` TEXT NOT NULL, `quantity` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, `multiBuy` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observationId",
+            "columnName": "observationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "multiBuy",
+            "columnName": "multiBuy",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "shopping_session",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `finalizedAt` INTEGER NOT NULL, `storeId` TEXT, `countryCode` TEXT, `baseCurrency` TEXT NOT NULL, `totalBase` TEXT NOT NULL, `totalsLocalJson` TEXT NOT NULL, `itemCount` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finalizedAt",
+            "columnName": "finalizedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "storeId",
+            "columnName": "storeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "countryCode",
+            "columnName": "countryCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "baseCurrency",
+            "columnName": "baseCurrency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBase",
+            "columnName": "totalBase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalsLocalJson",
+            "columnName": "totalsLocalJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemCount",
+            "columnName": "itemCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_shopping_session_finalizedAt",
+            "unique": false,
+            "columnNames": [
+              "finalizedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_shopping_session_finalizedAt` ON `${TABLE_NAME}` (`finalizedAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "purchase_line",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `productId` TEXT NOT NULL, `observationId` TEXT NOT NULL, `quantity` TEXT NOT NULL, `unitPriceLocal` TEXT NOT NULL, `localCurrency` TEXT NOT NULL, `unitPriceBase` TEXT, `baseCurrency` TEXT NOT NULL, `fxRate` TEXT, `isPromo` INTEGER NOT NULL, `nameAtPurchase` TEXT, `nameTranslatedAtPurchase` TEXT, `regularUnitPriceLocal` TEXT, `multiBuyJson` TEXT, `lineTotalLocal` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "productId",
+            "columnName": "productId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observationId",
+            "columnName": "observationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unitPriceLocal",
+            "columnName": "unitPriceLocal",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localCurrency",
+            "columnName": "localCurrency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unitPriceBase",
+            "columnName": "unitPriceBase",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "baseCurrency",
+            "columnName": "baseCurrency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fxRate",
+            "columnName": "fxRate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isPromo",
+            "columnName": "isPromo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameAtPurchase",
+            "columnName": "nameAtPurchase",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nameTranslatedAtPurchase",
+            "columnName": "nameTranslatedAtPurchase",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "regularUnitPriceLocal",
+            "columnName": "regularUnitPriceLocal",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "multiBuyJson",
+            "columnName": "multiBuyJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lineTotalLocal",
+            "columnName": "lineTotalLocal",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_purchase_line_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_purchase_line_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          },
+          {
+            "name": "index_purchase_line_productId",
+            "unique": false,
+            "columnNames": [
+              "productId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_purchase_line_productId` ON `${TABLE_NAME}` (`productId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "shopping_list",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "shopping_list_item",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `listId` TEXT NOT NULL, `text` TEXT NOT NULL, `category` TEXT NOT NULL, `checked` INTEGER NOT NULL, `checkedAt` INTEGER, `matchedObservationId` TEXT, `position` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listId",
+            "columnName": "listId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checked",
+            "columnName": "checked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkedAt",
+            "columnName": "checkedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "matchedObservationId",
+            "columnName": "matchedObservationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_shopping_list_item_listId",
+            "unique": false,
+            "columnNames": [
+              "listId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_shopping_list_item_listId` ON `${TABLE_NAME}` (`listId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "user_category_override",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`normalizedText` TEXT NOT NULL, `category` TEXT NOT NULL, PRIMARY KEY(`normalizedText`))",
+        "fields": [
+          {
+            "fieldPath": "normalizedText",
+            "columnName": "normalizedText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "normalizedText"
+          ]
+        }
+      },
+      {
+        "tableName": "rate_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`base` TEXT NOT NULL, `quote` TEXT NOT NULL, `provider` TEXT NOT NULL, `rate` TEXT NOT NULL, `publishedAt` INTEGER, `fetchedAt` INTEGER NOT NULL, `pivot` TEXT, PRIMARY KEY(`base`, `quote`, `provider`))",
+        "fields": [
+          {
+            "fieldPath": "base",
+            "columnName": "base",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quote",
+            "columnName": "quote",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provider",
+            "columnName": "provider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rate",
+            "columnName": "rate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "publishedAt",
+            "columnName": "publishedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetchedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pivot",
+            "columnName": "pivot",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "base",
+            "quote",
+            "provider"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '055a9a8aa1e7bf0008aa385f12446ccf')"
+    ]
+  }
+}

@@ -33,6 +33,10 @@ data class ParsedTag(
     val barcode: String?,
     /** [OcrFrame.id] of the frame this was read from. */
     val frameId: Long = 0,
+    /** Multi-buy deal on the tag, if any; [price] stays the regular single-unit price. */
+    val multiBuy: MultiBuyOffer? = null,
+    /** Every scored price on the tag, kept for a second, script-aware pass ([PriceTagParser.refine]). */
+    val candidates: List<PriceCandidate> = emptyList(),
 ) {
     /** Currency printed on the tag, or null when the tag shows no currency (assume local). */
     val printedCurrency: CurrencyCode? get() = price?.currency
@@ -59,9 +63,52 @@ object PriceTagParser {
         if (candidates.isEmpty()) {
             return ParsedTag.EMPTY.copy(barcode = barcode, frameId = frame.id)
         }
+        val scored = score(candidates, localDecimals)
+        val (decided, dealLines) = decide(scored, frame.lines)
+        val name = NameFinder.find(frame, decided.price, exclude = dealLines)
+        return decided.copy(
+            name = name?.first,
+            nameBox = name?.second,
+            nameRegion = decided.price?.let { nameRegion(it, name?.second, frame) },
+            barcode = barcode,
+            frameId = frame.id,
+        )
+    }
 
+    /**
+     * Second pass for scripts the fast recognizer can't read (design §14): [textLines] come from a
+     * script-aware OCR of the same frame, so deal, sale and per-kilo wording ("3 ცალის ყიდვისას",
+     * "ფასდაკლება", "1 კგ-ის ფასი") is understood, while prices still come from the fast recognizer.
+     */
+    fun refine(tag: ParsedTag, textLines: List<OcrLine>): ParsedTag {
+        if (tag.candidates.isEmpty() || textLines.isEmpty()) return tag
+        val remarked = tag.candidates.map { c ->
+            val perUnit = !c.isPerUnit && textLines.any { line ->
+                sameRow(c.box, line.box) && Lexicon.perUnitMarkers.any { line.text.lowercase().contains(it) }
+            }
+            if (perUnit) c.copy(isPerUnit = true, score = c.score - 0.45) else c
+        }.filter { it.score >= MIN_SCORE }.sortedByDescending { it.score }
+        val (decided, dealLines) = decide(remarked, textLines)
+        // The name as the script-aware OCR reads it, skipping deal and promotion wording.
+        val width = textLines.maxOf { it.box.right }.toInt().coerceAtLeast(1)
+        val height = textLines.maxOf { it.box.bottom }.toInt().coerceAtLeast(1)
+        val name = NameFinder.find(OcrFrame(textLines, width, height), decided.price, exclude = dealLines)
+        return tag.copy(
+            price = decided.price,
+            alternatives = decided.alternatives,
+            regularPrice = decided.regularPrice,
+            isPromo = decided.isPromo,
+            promoSignals = decided.promoSignals,
+            multiBuy = decided.multiBuy,
+            candidates = remarked,
+            name = name?.first ?: tag.name,
+            nameBox = name?.second ?: tag.nameBox,
+        )
+    }
+
+    private fun score(candidates: List<PriceCandidate>, localDecimals: Int): List<PriceCandidate> {
         val maxHeight = candidates.maxOf { it.box.height }.coerceAtLeast(1f)
-        val scored = candidates.map { c ->
+        return candidates.map { c ->
             var score = 0.55 * (c.box.height / maxHeight)
             if (c.currency != null) score += 0.25
             if (localDecimals > 0 && c.decimals == localDecimals) score += 0.10
@@ -69,14 +116,38 @@ object PriceTagParser {
             if (c.isPerUnit) score -= 0.45
             c.copy(score = score)
         }.filter { it.score >= MIN_SCORE }.sortedByDescending { it.score }
+    }
 
-        val promo = PromoDetector.detect(frame.lines)
-        val top = scored.firstOrNull()
+    /**
+     * Chooses the regular price, a multi-buy deal and sale signals from scored candidates and the
+     * tag's text. Also returns the indexes of the lines that hold the deal, so they aren't taken
+     * for the product name.
+     */
+    private fun decide(scored: List<PriceCandidate>, lines: List<OcrLine>): Pair<ParsedTag, Set<Int>> {
+        // A multi-buy deal's price must never be taken for the regular price, even when printed larger.
+        val match = MultiBuyDetector.detect(lines, scored)
+        val dealLineBoxes = match?.lines?.mapNotNull { lines.getOrNull(it)?.box }.orEmpty()
+        val withoutDeal = scored.filter { c ->
+            c !== match?.candidate &&
+                // The deal quantity itself ("3" in "3 ცალის ყიდვისას") is not a price.
+                !(match != null && c.amount.compareTo(BigDecimal.fromInt(match.quantity)) == 0 && dealLineBoxes.any { sameRow(c.box, it) })
+        }
+        val regularGuess = withoutDeal.firstOrNull { !it.isPerUnit }
+        val multiBuy = if (match == null || regularGuess == null) null else {
+            match.fixed ?: match.candidate?.let { MultiBuyOffer.resolve(match.quantity, it.amount, regularGuess.amount, match.hint) }
+        }
+        val pool = if (multiBuy != null) withoutDeal else scored
+        val promoAll = PromoDetector.detect(lines, if (multiBuy != null) match!!.lines else emptySet())
+        // Deal wording alone doesn't reduce the single price, so it isn't a sale for price tracking.
+        val promo = if (multiBuy != null) promoAll.copy(isPromo = promoAll.priceCut) else promoAll
+
+        val top = pool.firstOrNull()
         var best = top
         var regular: BigDecimal? = null
         if (top != null && promo.isPromo) {
             // On a promotion tag with two prices, the lower one is what you pay now.
-            val pair = scored.firstOrNull { !it.isPerUnit && it.amount.compareTo(top.amount) != 0 && it.score >= top.score * 0.5 }
+            // The old price is often printed small and without a currency sign, so the bar is low.
+            val pair = pool.firstOrNull { !it.isPerUnit && it.amount.compareTo(top.amount) != 0 && it.score >= top.score * 0.25 }
             if (pair != null) {
                 val low = if (pair.amount < top.amount) pair else top
                 val high = if (low === pair) top else pair
@@ -88,25 +159,28 @@ object PriceTagParser {
         }
 
         val chosen = best
-        val alternatives = if (chosen == null) emptyList() else scored
+        val alternatives = if (chosen == null) emptyList() else pool
             .filter { it !== chosen && it.amount.compareTo(chosen.amount) != 0 && !it.isPerUnit && it.score >= chosen.score * 0.9 }
             .filter { regular == null || it.amount.compareTo(regular) != 0 }
             .distinctBy { it.amount.toStringExpanded() }
             .take(2)
 
-        val name = NameFinder.find(frame, chosen)
-        return ParsedTag(
+        val tag = ParsedTag.EMPTY.copy(
             price = chosen,
             alternatives = alternatives,
             regularPrice = regular,
             isPromo = promo.isPromo,
             promoSignals = promo.signals,
-            name = name?.first,
-            nameBox = name?.second,
-            nameRegion = chosen?.let { nameRegion(it, name?.second, frame) },
-            barcode = barcode,
-            frameId = frame.id,
+            multiBuy = multiBuy,
+            candidates = scored,
         )
+        return tag to (if (multiBuy != null) match!!.lines else emptySet())
+    }
+
+    /** Boxes on the same text row: they overlap vertically by at least half the smaller height. */
+    private fun sameRow(a: Box, b: Box): Boolean {
+        val overlap = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
+        return overlap > 0.5f * minOf(a.height, b.height)
     }
 
     private fun candidatesInLine(line: OcrLine, local: CurrencyCode?, localDecimals: Int): List<PriceCandidate> {
@@ -130,6 +204,15 @@ object PriceTagParser {
                 if (suffixLower == "ლ" && run.decimals == 2 && (local == null || local == CurrencyCode.GEL)) {
                     currency = CurrencyCode.GEL // "3.99 ლ" is lari; "1 ლ" / "0.5 ლ" is litres
                 } else if (suffixLower in Lexicon.unitSuffixes || suffixLower.startsWith("%")) {
+                    return@mapNotNull null
+                }
+            }
+            // Deal quantities ("3 for", "buy 3", "3+", "1+1", "2/$5") are not prices.
+            if (run.decimals == 0 && currency == null) {
+                val prefixLower = prefix.lowercase()
+                if (Lexicon.quantitySuffixes.any { suffixLower.startsWith(it) } || prefixLower in Lexicon.quantityPrefixes ||
+                    prefixLower.endsWith("+")
+                ) {
                     return@mapNotNull null
                 }
             }

@@ -2,7 +2,10 @@ package app.parity.shared.data
 
 import app.parity.core.csv.Csv
 import app.parity.core.money.MoneyMath
+import app.parity.core.money.CurrencyCode
 import app.parity.core.money.decimal
+import app.parity.core.money.divideMoney
+import app.parity.core.scan.MultiBuyOffer
 import app.parity.core.money.toPlain
 import app.parity.core.transfer.unzip
 import app.parity.core.transfer.zip
@@ -184,12 +187,15 @@ class BackupService(private val db: ParityDatabase, private val appVersion: Stri
         val header = listOf(
             "date", "store", "product", "original_name", "quantity", "unit_price_base", "base_currency",
             "unit_price_local", "local_currency", "line_total_base", "line_total_local", "fx_rate", "sale",
+            "deal", "regular_unit_price_local",
         )
         val rows = lines.sortedBy { sessionById[it.sessionId]?.finalizedAt ?: 0 }.map { line ->
             val session = sessionById[line.sessionId]
             val qty = decimal(line.quantity)
             val unitLocal = decimal(line.unitPriceLocal)
             val unitBase = line.unitPriceBase?.let(::decimal)
+            val lineLocal = line.lineTotalLocal?.let(::decimal) ?: unitLocal.multiply(qty, MoneyMath)
+            val lineBase = line.fxRate?.let { lineLocal.divideMoney(decimal(it)) } ?: unitBase?.multiply(qty, MoneyMath)
             listOf(
                 session?.let { Instant.fromEpochMilliseconds(it.finalizedAt).toLocalDateTime(tz).toString() },
                 session?.storeId?.let { storeById[it]?.name },
@@ -200,10 +206,12 @@ class BackupService(private val db: ParityDatabase, private val appVersion: Stri
                 line.baseCurrency,
                 line.unitPriceLocal,
                 line.localCurrency,
-                unitBase?.multiply(qty, MoneyMath)?.toPlain(),
-                unitLocal.multiply(qty, MoneyMath).toPlain(),
+                lineBase?.toPlain(),
+                lineLocal.toPlain(),
                 line.fxRate,
                 if (line.isPromo) "yes" else "no",
+                MultiBuyOffer.fromJson(line.multiBuyJson)?.describe(CurrencyCode(line.localCurrency)),
+                line.regularUnitPriceLocal,
             )
         }
         return Csv.write(header, rows)

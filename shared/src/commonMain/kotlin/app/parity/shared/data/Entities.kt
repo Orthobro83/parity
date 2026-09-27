@@ -1,5 +1,6 @@
 package app.parity.shared.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -82,6 +83,8 @@ data class PriceObservationEntity(
     val fxFetchedAt: Long?,
     val fxProvider: String?,
     val fxPivot: String?,
+    /** Multi-buy deal printed on the tag ([app.parity.core.scan.MultiBuyOffer] JSON); [price] is still the regular price. */
+    val multiBuyJson: String? = null,
 )
 
 @Serializable
@@ -91,6 +94,8 @@ data class CartLineEntity(
     val observationId: String,
     val quantity: String,
     val addedAt: Long,
+    /** The shopper chose the tag's multi-buy deal for this line. */
+    @ColumnInfo(defaultValue = "0") val multiBuy: Boolean = false,
 )
 
 @Serializable
@@ -124,6 +129,12 @@ data class PurchaseLineEntity(
     val isPromo: Boolean,
     val nameAtPurchase: String?,
     val nameTranslatedAtPurchase: String?,
+    /** Single-unit shelf price when a multi-buy deal set [unitPriceLocal]; null otherwise. */
+    val regularUnitPriceLocal: String? = null,
+    /** The multi-buy deal applied to this line (MultiBuyOffer JSON), if any. */
+    val multiBuyJson: String? = null,
+    /** Exact line total in the local currency (a "3 for 10" deal doesn't divide evenly per unit). */
+    val lineTotalLocal: String? = null,
 )
 
 @Serializable

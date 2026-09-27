@@ -42,6 +42,8 @@ import app.parity.core.money.CurrencyCode
 import app.parity.core.money.MoneyFormat
 import app.parity.core.money.MoneyMath
 import app.parity.core.money.decimal
+import app.parity.core.money.divideMoney
+import app.parity.core.scan.MultiBuyOffer
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.SessionDetail
 import app.parity.shared.data.Settings
@@ -155,6 +157,9 @@ fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit, onRenameStor
                     val qty = decimal(line.quantity)
                     val unitLocal = decimal(line.unitPriceLocal)
                     val unitBase = line.unitPriceBase?.let(::decimal)
+                    val lineLocal = line.lineTotalLocal?.let(::decimal) ?: unitLocal.multiply(qty, MoneyMath)
+                    val lineBase = line.fxRate?.let { lineLocal.divideMoney(decimal(it)) } ?: unitBase?.multiply(qty, MoneyMath)
+                    val deal = MultiBuyOffer.fromJson(line.multiBuyJson)
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.surface).padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -171,10 +176,17 @@ fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit, onRenameStor
                             "${MoneyFormat.quantity(qty)} × " + (unitBase?.let { MoneyFormat.format(it, base) + " " } ?: "") + "(${MoneyFormat.format(unitLocal, local)})",
                             style = Parity.type.priceSmall, color = c.textSecondary,
                         )
+                        if (deal != null) {
+                            Text(
+                                "Deal: ${deal.describe(local)}" +
+                                    (line.regularUnitPriceLocal?.let { " · regular ${MoneyFormat.format(decimal(it), local)}" } ?: ""),
+                                style = Parity.type.caption, color = c.accent,
+                            )
+                        }
                         Row {
                             Text(
-                                (unitBase?.let { MoneyFormat.format(it.multiply(qty, MoneyMath), base) + "  " } ?: "") +
-                                    "(${MoneyFormat.format(unitLocal.multiply(qty, MoneyMath), local)})",
+                                (lineBase?.let { MoneyFormat.format(it, base) + "  " } ?: "") +
+                                    "(${MoneyFormat.format(lineLocal, local)})",
                                 style = Parity.type.priceSmall, modifier = Modifier.weight(1f),
                             )
                             line.fxRate?.let { Text("1 ${base.code} = ${formatRate(decimal(it))} ${local.code}", style = Parity.type.caption, color = c.textSecondary) }

@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.Rect
 import com.googlecode.tesseract.android.TessBaseAPI
 import android.os.SystemClock
 import android.util.Log
@@ -48,6 +49,41 @@ class TesseractReader(private val context: Context) {
         }
     }
 
+    /** Text lines with bounding boxes in [bitmap] coordinates, using automatic page segmentation. */
+    suspend fun readLines(bitmap: Bitmap, languages: String): List<Pair<String, Rect>>? = withContext(Dispatchers.Default) {
+        mutex.withLock {
+            val tess = engineFor(languages) ?: return@withLock null
+            val scale = scaleFor(bitmap)
+            val prepared = prepare(bitmap)
+            val started = SystemClock.elapsedRealtime()
+            try {
+                tess.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
+                tess.setImage(prepared)
+                tess.getUTF8Text() // runs recognition
+                val iterator = tess.getResultIterator() ?: return@withLock null
+                val lines = mutableListOf<Pair<String, Rect>>()
+                try {
+                    iterator.begin()
+                    do {
+                        val text = iterator.getUTF8Text(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)?.trim()
+                        val r = iterator.getBoundingRect(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
+                        if (!text.isNullOrEmpty() && r != null) {
+                            lines += text to Rect((r.left / scale).toInt(), (r.top / scale).toInt(), (r.right / scale).toInt(), (r.bottom / scale).toInt())
+                        }
+                    } while (iterator.next(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE))
+                } finally {
+                    iterator.delete()
+                }
+                Log.d(TAG, "lines ${prepared.width}x${prepared.height} in ${SystemClock.elapsedRealtime() - started} ms: ${lines.joinToString(" | ") { it.first }}")
+                lines
+            } finally {
+                tess.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK)
+                tess.clear()
+                if (prepared !== bitmap) prepared.recycle()
+            }
+        }
+    }
+
     private fun engineFor(languages: String): TessBaseAPI? {
         if (loadedLanguages == languages) return api
         api?.recycle()
@@ -79,13 +115,15 @@ class TesseractReader(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    private fun scaleFor(source: Bitmap): Float = when {
+        source.height < 60 -> 3f
+        source.height < 120 -> 2f
+        else -> 1f
+    }
+
     /** Grayscale and upscale small crops so glyphs are ~40 px tall, which Tesseract prefers. */
     private fun prepare(source: Bitmap): Bitmap {
-        val scale = when {
-            source.height < 60 -> 3f
-            source.height < 120 -> 2f
-            else -> 1f
-        }
+        val scale = scaleFor(source)
         val width = (source.width * scale).toInt().coerceAtLeast(1)
         val height = (source.height * scale).toInt().coerceAtLeast(1)
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

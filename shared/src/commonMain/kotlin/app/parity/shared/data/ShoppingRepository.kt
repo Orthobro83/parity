@@ -6,6 +6,7 @@ import app.parity.core.money.MoneyMath
 import app.parity.core.money.decimal
 import app.parity.core.money.divideMoney
 import app.parity.core.money.toPlain
+import app.parity.core.scan.MultiBuyOffer
 import app.parity.core.scan.Names
 import app.parity.shared.platform.LocationFix
 import app.parity.shared.util.newId
@@ -32,10 +33,23 @@ data class CartItem(
     val product: ProductEntity,
 ) {
     val quantity: BigDecimal get() = decimal(line.quantity)
-    val unitLocal: BigDecimal get() = decimal(observation.price)
+    val regularUnit: BigDecimal get() = decimal(observation.price)
     val localCurrency: CurrencyCode get() = CurrencyCode(observation.localCurrency)
     val rate: BigDecimal? get() = observation.fxRate?.let(::decimal)
-    val lineLocal: BigDecimal get() = unitLocal.multiply(quantity, MoneyMath)
+
+    /** The tag's multi-buy deal, when the shopper chose it for this line. */
+    val offer: MultiBuyOffer? get() = if (line.multiBuy) MultiBuyOffer.fromJson(observation.multiBuyJson) else null
+
+    private val wholeUnits: Int? get() = line.quantity.takeIf { q -> q.all { it.isDigit() } }?.toIntOrNull()
+
+    /** True when the quantity qualifies for the chosen deal. */
+    val dealApplied: Boolean get() = offer?.let { o -> wholeUnits?.let(o::appliesTo) } == true
+
+    val lineLocal: BigDecimal
+        get() = if (dealApplied) offer!!.total(wholeUnits!!, regularUnit) else regularUnit.multiply(quantity, MoneyMath)
+
+    /** Effective price per unit, after any deal. */
+    val unitLocal: BigDecimal get() = if (quantity.signum() > 0) lineLocal.divideMoney(quantity) else regularUnit
 
     /** Converted with the rate locked in when the item was scanned (design §7). */
     val lineBase: BigDecimal? get() = rate?.let { lineLocal.divideMoney(it) }
@@ -147,17 +161,22 @@ class ShoppingRepository(private val db: ParityDatabase) {
         isPromo: Boolean,
         baseCurrency: CurrencyCode,
         rate: FxRate?,
+        multiBuy: MultiBuyOffer? = null,
     ): PriceObservationEntity {
         val priceText = price.toPlain()
         observations.recentFor(product.id, now() - 10 * 60_000).firstOrNull {
             it.price == priceText && it.localCurrency == localCurrency.code && it.baseCurrency == baseCurrency.code
-        }?.let { return it }
+        }?.let { existing ->
+            if (multiBuy == null || existing.multiBuyJson != null) return existing
+            return existing.copy(multiBuyJson = multiBuy.toJson()).also { observations.upsert(it) }
+        }
         val observation = PriceObservationEntity(
             id = newId(), productId = product.id, storeId = store?.id, sessionId = null, observedAt = now(),
             countryCode = countryCode, localCurrency = localCurrency.code, price = priceText,
             regularPrice = regularPrice?.toPlain(), isPromo = isPromo, promoSource = "AUTO",
             baseCurrency = baseCurrency.code, fxRate = rate?.value?.toPlain(), fxRateAt = rate?.publishedAtMs,
             fxFetchedAt = rate?.fetchedAtMs, fxProvider = rate?.provider, fxPivot = rate?.pivot?.code,
+            multiBuyJson = multiBuy?.toJson(),
         )
         observations.upsert(observation)
         return observation
@@ -192,10 +211,10 @@ class ShoppingRepository(private val db: ParityDatabase) {
         }
     }
 
-    suspend fun addToCart(observationId: String, quantity: BigDecimal): CartLineEntity {
+    suspend fun addToCart(observationId: String, quantity: BigDecimal, multiBuy: Boolean = false): CartLineEntity {
         val existing = cart.byObservation(observationId)
-        val line = existing?.copy(quantity = (decimal(existing.quantity) + quantity).toPlain())
-            ?: CartLineEntity(newId(), observationId, quantity.toPlain(), now())
+        val line = existing?.copy(quantity = (decimal(existing.quantity) + quantity).toPlain(), multiBuy = existing.multiBuy || multiBuy)
+            ?: CartLineEntity(newId(), observationId, quantity.toPlain(), now(), multiBuy)
         cart.upsert(line)
         return line
     }
@@ -231,10 +250,15 @@ class ShoppingRepository(private val db: ParityDatabase) {
         val lines = items.map { item ->
             PurchaseLineEntity(
                 id = newId(), sessionId = sessionId, productId = item.product.id, observationId = item.observation.id,
-                quantity = item.line.quantity, unitPriceLocal = item.observation.price, localCurrency = item.observation.localCurrency,
+                quantity = item.line.quantity,
+                unitPriceLocal = if (item.dealApplied) item.unitLocal.toPlain() else item.observation.price,
+                localCurrency = item.observation.localCurrency,
                 unitPriceBase = item.rate?.let { item.unitLocal.divideMoney(it).toPlain() }, baseCurrency = item.observation.baseCurrency,
                 fxRate = item.observation.fxRate, isPromo = item.observation.isPromo,
                 nameAtPurchase = item.product.originalName, nameTranslatedAtPurchase = item.product.displayName,
+                regularUnitPriceLocal = if (item.dealApplied) item.observation.price else null,
+                multiBuyJson = if (item.dealApplied) item.offer?.toJson() else null,
+                lineTotalLocal = item.lineLocal.toPlain(),
             )
         }
         db.useWriterConnectionTransaction {

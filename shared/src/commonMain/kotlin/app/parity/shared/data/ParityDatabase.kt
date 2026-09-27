@@ -1,5 +1,6 @@
 package app.parity.shared.data
 
+import androidx.room.AutoMigration
 import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
@@ -12,8 +13,10 @@ import androidx.room.RoomDatabaseConstructor
         ShoppingListEntity::class, ShoppingListItemEntity::class, CategoryOverrideEntity::class,
         RateCacheEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
+    // v2: multi-buy deals on observations, cart lines and purchase lines.
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 @ConstructedBy(ParityDatabaseConstructor::class)
 abstract class ParityDatabase : RoomDatabase() {

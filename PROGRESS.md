@@ -48,6 +48,9 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 - [ ] Georgian OCR on real photos (synthetic tags pass; real tags have glare, fonts, angles) — needs the phone
 - [x] M4: encrypted all-data transfer by QR (12-char code, PBKDF2 + AES-GCM); lists by QR (unencrypted, per design)
 - [x] Store names: History → open a session → tap the store name to rename it ("Store 1" by default)
+- [x] 0.2.0 multi-buy deals (design §7.1): detection (EN/KA/RU), Georgian second OCR pass, "just 1 or
+      the deal" choice, cart + History + CSV; DB v2 auto-migration verified by upgrading 0.1.0 → 0.2.0
+      on the emulator with data; typed names in manual entry kept (bug in 0.1.0 in Georgia)
 - [ ] M5 (after Phase 1): full analytics charts
 - [x] Release build: R8 keep rules for ML Kit + Tesseract, per-ABI APKs (arm64 release ≈ 59 MB); verified on emulator
 

@@ -197,7 +197,8 @@ class CameraScannerImpl(
         future.addListener({ runCatching { future.get() }.onSuccess(cont::resume).onFailure(cont::resumeWithException) }, ContextCompat.getMainExecutor(context))
     }
 
-    override suspend fun readRegion(frameId: Long, region: Box, languages: String): String? {
+    /** The upright crop of [region] from frame [frameId], and its offset in the frame. */
+    private fun crop(frameId: Long, region: Box): Triple<Bitmap, Int, Int>? {
         val photo = synchronized(photos) { photos[frameId] }
         val (frame, rotation) = photo?.let { it to 0 } ?: synchronized(frames) { frames[frameId] } ?: return null
         val upright = if (rotation == 0) frame else {
@@ -208,8 +209,19 @@ class CameraScannerImpl(
         val right = region.right.toInt().coerceIn(left + 1, upright.width)
         val bottom = region.bottom.toInt().coerceIn(top + 1, upright.height)
         if (right - left < 8 || bottom - top < 8) return null
-        val crop = Bitmap.createBitmap(upright, left, top, right - left, bottom - top)
-        return tesseract.read(crop, languages)
+        return Triple(Bitmap.createBitmap(upright, left, top, right - left, bottom - top), left, top)
+    }
+
+    override suspend fun readRegion(frameId: Long, region: Box, languages: String): String? {
+        val (bitmap, _, _) = crop(frameId, region) ?: return null
+        return tesseract.read(bitmap, languages)
+    }
+
+    override suspend fun readLines(frameId: Long, region: Box, languages: String): List<OcrLine>? {
+        val (bitmap, dx, dy) = crop(frameId, region) ?: return null
+        return tesseract.readLines(bitmap, languages)?.map { (text, r) ->
+            OcrLine(text, Box((r.left + dx).toFloat(), (r.top + dy).toFloat(), (r.right + dx).toFloat(), (r.bottom + dy).toFloat()))
+        }
     }
 
     override suspend fun scanImage(bytes: ByteArray): OcrFrame? = withContext(Dispatchers.Default) {

@@ -8,6 +8,7 @@ import app.parity.core.money.MoneyFormat
 import app.parity.core.money.decimal
 import app.parity.core.money.toPlain
 import app.parity.core.scan.Box
+import app.parity.core.scan.MultiBuyOffer
 import app.parity.core.scan.NameText
 import app.parity.core.scan.OcrFrame
 import app.parity.core.scan.ParsedTag
@@ -63,6 +64,8 @@ data class ScanCard(
     val productId: String? = null,
     val indicator: FxIndicator? = null,
     val previous: PreviousSighting? = null,
+    /** Multi-buy deal on the tag; [localPrice] stays the regular single-unit price. */
+    val multiBuy: MultiBuyOffer? = null,
 ) {
     val basePrice: BigDecimal? get() = rate?.localToBase(localPrice)
 }
@@ -158,12 +161,14 @@ class HomeController(private val graph: AppGraph) {
             localPrice = price.amount,
             localCurrency = local,
             baseCurrency = settings.baseCurrency,
-            name = tag.name.takeIf { latinLabels(settings) },
-            originalName = tag.name.takeIf { latinLabels(settings) },
+            // A typed-in name (frame 0) is always shown; OCR names only where the script reads reliably.
+            name = tag.name.takeIf { tag.frameId == 0L || latinLabels(settings) },
+            originalName = tag.name.takeIf { tag.frameId == 0L || latinLabels(settings) },
             isPromo = tag.isPromo,
             regularPrice = tag.regularPrice,
             alternatives = tag.alternatives.map { it.amount },
             printedCurrency = printed,
+            multiBuy = tag.multiBuy,
         )
         _card.value = card
         graph.platform.haptics.tick()
@@ -177,11 +182,31 @@ class HomeController(private val graph: AppGraph) {
 
     /** Rate, name (Tesseract for scripts ML Kit can't read), product identity, ▲/▼, translation. */
     private suspend fun enrich(cardId: Long, tag: ParsedTag, settings: Settings, local: CurrencyCode, record: Boolean) = coroutineScope {
-        // Read the name while the rate is fetched; the frame must still be in the camera's cache.
-        val name = async { resolveName(tag, settings) }
+        // Read the name (and, for scripts the fast recognizer can't read, the tag's wording) while the
+        // rate is fetched; the frame must still be in the camera's cache.
+        val refined = async { refineWithScriptOcr(tag, settings) }
+        val name = async {
+            // The script-aware pass reads the whole tag; its name skips promotion banners. Fall back
+            // to a focused read of the name area when it found none.
+            refined.await()?.name?.let { NameText.pickLines(it, Languages.labelLanguageFor(settings.country)) }
+                ?: resolveName(tag, settings)
+        }
         val rateResult = graph.rates.rate(settings.baseCurrency, local, settings.rateProvider, settings.rateApiKey)
         update(cardId) { it.copy(rate = rateResult.rate, rateStale = rateResult.stale, rateLoading = false) }
 
+        refined.await()?.takeIf { it.differsFrom(tag) }?.let { better ->
+            update(cardId) { card ->
+                // Keep a price the shopper picked by hand; otherwise take the better reading.
+                val priceUntouched = card.localPrice.compareTo(tag.price?.amount ?: card.localPrice) == 0
+                card.copy(
+                    localPrice = if (priceUntouched) better.price?.amount ?: card.localPrice else card.localPrice,
+                    regularPrice = better.regularPrice ?: card.regularPrice,
+                    isPromo = better.isPromo,
+                    multiBuy = card.multiBuy ?: better.multiBuy,
+                    alternatives = better.alternatives.map { it.amount },
+                )
+            }
+        }
         val originalName = name.await()
         update(cardId) {
             it.copy(
@@ -201,7 +226,7 @@ class HomeController(private val graph: AppGraph) {
         val observation = graph.shopping.recordObservation(
             product = product, store = store, countryCode = settings.country, localCurrency = local,
             price = card.localPrice, regularPrice = card.regularPrice, isPromo = card.isPromo,
-            baseCurrency = settings.baseCurrency, rate = rateResult.rate,
+            baseCurrency = settings.baseCurrency, rate = rateResult.rate, multiBuy = card.multiBuy,
         )
         val previous = graph.shopping.previousSighting(observation)
         val indicator = run {
@@ -223,13 +248,39 @@ class HomeController(private val graph: AppGraph) {
         }
     }
 
+    /**
+     * Georgian (and other non-Latin) tags: re-read the area around the price with Tesseract so deal,
+     * sale and per-kilo wording and the name are understood (design §14). Null when not needed or
+     * not readable.
+     */
+    private suspend fun refineWithScriptOcr(tag: ParsedTag, settings: Settings): ParsedTag? {
+        if (latinLabels(settings)) return null
+        val price = tag.price ?: return null
+        val tesseract = tesseractLanguages(settings) ?: return null
+        val p = price.box
+        if (p.width <= 0f || p.height <= 0f) return null // typed-in price: no image
+        val area = Box(p.left - p.width * 1.2f, p.top - p.height * 2.5f, p.right + p.width * 1.2f, p.bottom + p.height * 3.2f)
+        val lines = withTimeoutOrNull(10_000) {
+            runCatching { graph.platform.camera.readLines(tag.frameId, area, tesseract) }.getOrNull()
+        } ?: return null
+        return withContext(Dispatchers.Default) { PriceTagParser.refine(tag, lines) }
+    }
+
+    private fun ParsedTag.differsFrom(original: ParsedTag): Boolean =
+        multiBuy != original.multiBuy || isPromo != original.isPromo || regularPrice != original.regularPrice ||
+            price?.amount?.compareTo(original.price?.amount ?: return true) != 0
+
+    private fun tesseractLanguages(settings: Settings): String? = when (Languages.labelLanguageFor(settings.country)) {
+        "ka" -> "kat+eng"
+        "ru", "uk", "be" -> "rus+eng"
+        else -> null
+    }
+
     private suspend fun resolveName(tag: ParsedTag, settings: Settings): String? {
+        // Typed in by hand (manual entry): take it as written.
+        if (tag.frameId == 0L) return tag.name?.trim()?.ifEmpty { null }
         val labelLanguage = Languages.labelLanguageFor(settings.country)
-        val tesseract = when (labelLanguage) {
-            "ka" -> "kat+eng"
-            "ru", "uk", "be" -> "rus+eng"
-            else -> null
-        }
+        val tesseract = tesseractLanguages(settings)
         val region = tag.nameRegion
         if (tesseract != null) {
             // The Latin recognizer turns other scripts into gibberish, so don't fall back to it.
@@ -272,8 +323,11 @@ class HomeController(private val graph: AppGraph) {
         _card.value = null
     }
 
-    /** Adds the current card to the cart and crosses off a matching list item (design §7, §8.3). */
-    fun buy(quantity: BigDecimal) {
+    /**
+     * Adds the current card to the cart and crosses off a matching list item (design §7, §8.3).
+     * [useDeal] is the shopper's answer when the tag has a multi-buy deal.
+     */
+    fun buy(quantity: BigDecimal, useDeal: Boolean = false) {
         val card = _card.value ?: return
         scope.launch {
             if (card.observationId == null) withTimeoutOrNull(8_000) { enrichJob?.join() }
@@ -283,7 +337,7 @@ class HomeController(private val graph: AppGraph) {
                 graph.messages.show("Still reading this tag — try again in a moment.")
                 return@launch
             }
-            graph.shopping.addToCart(observationId, quantity)
+            graph.shopping.addToCart(observationId, quantity, multiBuy = useDeal && current.multiBuy != null)
             val product = current.productId?.let { graph.shopping.product(it) }
             val names = listOfNotNull(product?.userEditedName, product?.translatedName, product?.originalName, current.name)
             graph.listController.activeListIdOrNull()?.let { listId ->
@@ -313,6 +367,15 @@ class HomeController(private val graph: AppGraph) {
         }
     }
 
+    /** Adds, corrects or removes the tag's multi-buy deal (for tags the camera misread). */
+    fun setMultiBuy(offer: MultiBuyOffer?) {
+        val card = _card.value ?: return
+        _card.value = card.copy(multiBuy = offer)
+        card.observationId?.let { id ->
+            scope.launch { graph.shopping.updateObservation(id) { it.copy(multiBuyJson = offer?.toJson()) } }
+        }
+    }
+
     fun rename(name: String) {
         val card = _card.value ?: return
         _card.value = card.copy(name = name, nameStatus = NameStatus.DONE)
@@ -330,10 +393,10 @@ class HomeController(private val graph: AppGraph) {
     }
 
     /** Price entry without the camera: permission denied, or a tag the camera can't read. */
-    fun manualEntry(price: BigDecimal, name: String?) {
+    fun manualEntry(price: BigDecimal, name: String?, deal: MultiBuyOffer? = null) {
         val settings = graph.settings.value ?: return
         val candidate = PriceCandidate(price, 2, null, price.toPlain(), Box(0f, 0f, 0f, 0f), false, 1.0)
-        val tag = ParsedTag.EMPTY.copy(price = candidate, name = name?.trim()?.ifEmpty { null })
+        val tag = ParsedTag.EMPTY.copy(price = candidate, name = name?.trim()?.ifEmpty { null }, multiBuy = deal)
         stabilizer.reset()
         show(tag, settings)
     }
