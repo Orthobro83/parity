@@ -15,8 +15,17 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
-        // Phones and the x86_64 emulator; keeps Tesseract's native libraries out of other ABIs.
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+    }
+
+    // One APK per CPU type: ML Kit, translation and Tesseract ship large native libraries, so a
+    // universal APK would carry three copies. Modern phones use the arm64-v8a APK.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = false
+        }
     }
 
     buildTypes {
