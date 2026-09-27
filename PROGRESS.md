@@ -12,39 +12,53 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ```
 
 `local.properties` (git-ignored) must contain `sdk.dir=/Users/<you>/Library/Android/sdk`.
+Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk`.
 
 ## Modules
 
 | Module | Contents |
 |---|---|
 | `core` | Pure Kotlin (JVM target now, iOS in Phase 2): money, currencies, price-tag parser, sale detector, FX indicator math, list classifier, QR frame codec, CSV |
-| `shared` | KMP Android library: Room database, rate providers (Ktor), app state, Compose Multiplatform UI |
+| `shared` | KMP Android library: Room database, rate providers (Ktor), controllers, Compose Multiplatform UI |
 | `androidApp` | Android app: CameraX, ML Kit, Tesseract (Georgian), location, QR bitmap encoding (ZXing) |
 
 ## Status
 
 - [x] M0 scaffold: Gradle (AGP 9.4.1, Kotlin 2.4.20, Compose MP 1.12.1), three modules, debug APK builds
 - [x] M0 assets: Source Sans 3 fonts, tessdata (`kat`, `eng`, `rus`)
-- [x] core: money + currency catalog
+- [x] core: money + currency/country/language catalogs
 - [x] core: price-tag parser + sale detector + stabilizer (+ tests)
-- [x] core: FX indicator (+ tests)
+- [x] core: FX indicator, no dead-band, ≥3 significant digits (+ tests)
 - [x] core: shopping-list parser + classifier + purchase matcher (+ tests)
 - [x] core: QR frame codec ("i of N"), base45, CRC-32, SHA-256, reassembler (+ tests)
 - [x] core: CSV codec + ZIP (+ tests)
-- [ ] shared: Room entities/DAOs, repositories
-- [ ] shared: rate providers + cache + pivots
-- [ ] shared: theme (dark, Source Sans 3, pills), navigation shell
-- [ ] shared: Home (camera slot, total bar, result card, buy sheet, cart sheet, finalize)
-- [ ] shared: List, History, Analytics placeholder, Settings, QR send/receive screens
-- [ ] androidApp: CameraX + ML Kit OCR/barcode, Tesseract names, translation, location
+- [x] shared: Room entities/DAOs, repositories (shopping, lists, settings, backup)
+- [x] shared: rate providers (6) + cache + pivots + crypto legs via CoinGecko
+- [x] shared: theme (dark, Source Sans 3, pills), navigation shell
+- [x] shared: Home (camera, total bar, result card, quantity/cart sheets, finalize dialog, list strip, manual entry)
+- [x] shared: List, History (+ detail), Analytics (Phase 1 summary), Settings, Onboarding, QR send/receive
+- [x] androidApp: CameraX + ML Kit OCR/barcode, Tesseract names, ML Kit translation, location, SAF files, ZXing, haptics
+- [ ] Emulator smoke test (launch, onboarding, manual price, cart, finalize, history, list, QR send screen)
+- [ ] Real-device test on a phone (camera OCR, Georgian names) — needs the user's phone over USB
+- [ ] Georgian OCR golden set: photos of real Georgian tags, measure parser + Tesseract accuracy
+- [ ] M4: encrypted backup over QR (passphrase, design §8.5) — list sharing by QR already works
+- [ ] M5 (after Phase 1): full analytics charts
+- [ ] Release build check (R8 keep rules for Tesseract/ML Kit/Room)
 
 ## Decisions made during the build
 
 - `applicationId = "app.parity"` is a placeholder for the sideloaded build (see androidApp/build.gradle.kts).
   Kotlin packages (`app.parity.*`) are independent of it.
-- No DI framework and no ViewModel library: an app-scoped `AppGraph` holds state holders with their own
-  coroutine scopes. MainActivity handles config changes itself and is locked to portrait.
+- No DI framework and no ViewModel library: an app-scoped `AppGraph` holds controllers with their own
+  coroutine scope. MainActivity handles config changes itself and is locked to portrait.
 - The shared theme receives its `FontFamily` from the platform, so Compose resources are not needed.
+- QR payloads are JSON + DEFLATE (design said CBOR + zstd); simpler and still ~4× smaller than raw.
+- QR frames are Base45 text so they use the QR alphanumeric mode; 700-byte chunks per frame.
+- Backups over QR are not offered yet: design requires passphrase encryption first (M4).
+- Rate API keys are stored in the app database (not the Keystore yet) and are never exported.
+- Classifier tier 2 (on-device embeddings) is not built; the lexicon + user overrides cover Phase 1.
+- Every locked scan is recorded as an observation; repeats of the same product+price within
+  10 minutes reuse the earlier one.
 
 ## Next step
 

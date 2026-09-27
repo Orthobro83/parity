@@ -27,7 +27,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -107,10 +110,13 @@ class HomeController(private val graph: AppGraph) {
         }
         // Fetch the translation model for the local language before the first scan needs it.
         scope.launch {
-            graph.settings.collect { settings ->
-                val label = Languages.labelLanguageFor(settings?.country) ?: return@collect
-                if (label != settings?.language) runCatching { graph.platform.text.prepare(label, settings!!.language) }
-            }
+            graph.settings
+                .map { s -> s?.let { Languages.labelLanguageFor(it.country) to it.language } }
+                .distinctUntilChanged()
+                .collectLatest { pair ->
+                    val (label, language) = pair ?: return@collectLatest
+                    if (label != null && label != language) runCatching { graph.platform.text.prepare(label, language) }
+                }
         }
     }
 
