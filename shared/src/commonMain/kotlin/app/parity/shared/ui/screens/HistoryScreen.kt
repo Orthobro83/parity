@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -26,6 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -116,16 +121,22 @@ private fun DateField(label: String, value: String, maxLength: Int, modifier: Mo
 
 /** One session: what was bought, in the user's currency and the local one, in the user's language. */
 @Composable
-fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit) {
+fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit, onRenameStore: (String) -> Unit) {
     val c = Parity.colors
     val base = CurrencyCode(detail.session.baseCurrency)
+    var renaming by remember { mutableStateOf(false) }
     Surface(color = c.bg, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(formatDateTime(detail.session.finalizedAt), style = Parity.type.headline)
-                    detail.storeName?.let { Text(it, style = Parity.type.body, color = c.textSecondary) }
+                    detail.storeName?.let { name ->
+                        Row(Modifier.clip(RoundedCornerShape(10.dp)).clickable { renaming = true }, verticalAlignment = Alignment.CenterVertically) {
+                            Text(name, style = Parity.type.body, color = c.textSecondary)
+                            Icon(Icons.Rounded.Edit, contentDescription = "Rename store", tint = c.textSecondary, modifier = Modifier.padding(start = 6.dp).size(16.dp))
+                        }
+                    }
                 }
                 RoundIconButton(Icons.Rounded.Close, "Close", onClose)
             }
@@ -173,5 +184,8 @@ fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit) {
                 item { Spacer(Modifier.width(1.dp).height(24.dp)) }
             }
         }
+    }
+    if (renaming) {
+        EditNameDialog(detail.storeName ?: "", onSave = { onRenameStore(it); renaming = false }, onDismiss = { renaming = false }, title = "Store name")
     }
 }

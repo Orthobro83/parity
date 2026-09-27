@@ -273,13 +273,13 @@ fun FinalizeDialog(open: List<String>, onKeepShopping: () -> Unit, onFinalize: (
 }
 
 @Composable
-fun EditNameDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+fun EditNameDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit, title: String = "Product name") {
     var text by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Parity.colors.surfaceRaised,
         shape = RoundedCornerShape(28.dp),
-        title = { Text("Product name", style = Parity.type.headline) },
+        title = { Text(title, style = Parity.type.headline) },
         text = {
             OutlinedTextField(
                 value = text, onValueChange = { text = it.take(80) }, singleLine = true,

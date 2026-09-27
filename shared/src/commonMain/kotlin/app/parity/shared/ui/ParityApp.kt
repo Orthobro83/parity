@@ -132,7 +132,7 @@ private fun MainShell(graph: AppGraph, settings: Settings) {
                 }
             }
         }
-        detail?.let { SessionDetailScreen(it, onClose = graph.history::close) }
+        detail?.let { SessionDetailScreen(it, onClose = graph.history::close, onRenameStore = graph.history::renameStore) }
         sending?.let { SendScreen(it, graph.platform.qr, onClose = graph.transfer::closeSend) }
         if (receiving) ReceiveScreen(graph, onClose = graph.transfer::stopReceiving)
     }

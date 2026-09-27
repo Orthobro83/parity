@@ -53,4 +53,14 @@ class HistoryController(private val graph: AppGraph) {
     fun close() {
         _detail.value = null
     }
+
+    /** Names a store, e.g. "Carrefour, Tbilisi Mall" instead of "Store 3" (design §5). */
+    fun renameStore(name: String) {
+        val detail = _detail.value ?: return
+        val storeId = detail.session.storeId ?: return
+        graph.scope.launch {
+            graph.shopping.renameStore(storeId, name)
+            _detail.value = graph.shopping.sessionDetail(detail.session.id)
+        }
+    }
 }

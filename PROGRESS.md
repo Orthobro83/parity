@@ -47,6 +47,7 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 - [ ] Real-device test on a phone (camera OCR, Georgian names) — needs the user's phone over USB
 - [ ] Georgian OCR on real photos (synthetic tags pass; real tags have glare, fonts, angles) — needs the phone
 - [x] M4: encrypted all-data transfer by QR (12-char code, PBKDF2 + AES-GCM); lists by QR (unencrypted, per design)
+- [x] Store names: History → open a session → tap the store name to rename it ("Store 1" by default)
 - [ ] M5 (after Phase 1): full analytics charts
 - [x] Release build: R8 keep rules for ML Kit + Tesseract, per-ABI APKs (arm64 release ≈ 59 MB); verified on emulator
 
@@ -78,5 +79,4 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 ## Next step
 
 See the first unchecked item above. Also worth doing next:
-- Rename stores (the repository supports it; there's no UI yet — stores appear as "Store 1", "Store 2").
 - Try real Georgian tags from photos (Home → photo icon) as soon as possible.
