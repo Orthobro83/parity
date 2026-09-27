@@ -1,6 +1,7 @@
 package app.parity.shared.rates
 
 import app.parity.core.fx.FxRate
+import app.parity.core.fx.roundSignificant
 import app.parity.core.money.Currencies
 import app.parity.core.money.CurrencyCode
 import app.parity.core.money.MoneyMath
@@ -44,7 +45,8 @@ class RatesRepository(private val cache: RateCacheDao, http: HttpClient? = null)
         val fresh = cached != null && now() - cached.fetchedAtMs < provider.updateIntervalMs
         if (fresh && !forceRefresh) return@withLock RateResult(cached, false)
 
-        val fetched = runCatching { fetchWithPivots(base, quote, provider, apiKey) }
+        // Cross rates are computed to 34 digits; keep 12 significant ones (sources publish ~6–10).
+        val fetched = runCatching { fetchWithPivots(base, quote, provider, apiKey).let { it.copy(value = roundSignificant(it.value, 12)) } }
         fetched.getOrNull()?.let { rate ->
             cache.upsert(rate.toEntity())
             return@withLock RateResult(rate, false)

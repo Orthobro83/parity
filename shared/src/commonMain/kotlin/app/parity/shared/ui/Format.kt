@@ -32,6 +32,9 @@ fun formatAge(epochMs: Long, nowMs: Long): String {
     }
 }
 
+/** "1 item", "3 items" */
+fun plural(count: Int, noun: String): String = "$count ${if (count == 1) noun else noun + "s"}"
+
 /** Parses what the user typed: accepts "9,99" and "9.99". Null unless it's a positive number. */
 fun parseUserAmount(text: String): BigDecimal? =
     parseDecimal(text.trim().replace(',', '.'))?.takeIf { it.signum() > 0 }

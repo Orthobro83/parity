@@ -26,17 +26,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.parity.core.fx.FxIndicator
 import app.parity.core.fx.formatPercent
+import app.parity.core.fx.formatRate
 import app.parity.core.money.CurrencyCode
 import app.parity.core.money.MoneyFormat
 import app.parity.core.money.decimal
 import app.parity.core.money.divideMoney
-import app.parity.core.money.toPlain
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.PriceObservationEntity
 import app.parity.shared.data.Settings
 import app.parity.shared.ui.components.FxBadge
 import app.parity.shared.ui.components.SectionHeader
 import app.parity.shared.ui.formatDate
+import app.parity.shared.ui.plural
 import app.parity.shared.ui.theme.Parity
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 
@@ -74,7 +75,7 @@ fun AnalyticsScreen(graph: AppGraph, settings: Settings) {
             Spacer(Modifier.height(12.dp))
             Text("Analytics", style = Parity.type.headline)
             Text(
-                "${observations.size} prices recorded · ${observations.map { it.productId }.distinct().size} products",
+                "${plural(observations.size, "price")} recorded · ${plural(observations.map { it.productId }.distinct().size, "product")}",
                 style = Parity.type.body, color = c.textSecondary,
             )
             SectionHeader("Your currency vs local")
@@ -88,7 +89,7 @@ fun AnalyticsScreen(graph: AppGraph, settings: Settings) {
                         Text("${pair.base.code} → ${pair.local.code}", style = Parity.type.title)
                         Text("Since ${formatDate(pair.first.observedAt)} · ${pair.count} scans", style = Parity.type.caption, color = c.textSecondary)
                         Text(
-                            "1 ${pair.base.code} = ${decimal(pair.first.fxRate!!).toPlain()} → ${decimal(pair.last.fxRate!!).toPlain()} ${pair.local.code}",
+                            "1 ${pair.base.code} = ${formatRate(decimal(pair.first.fxRate!!))} → ${formatRate(decimal(pair.last.fxRate!!))} ${pair.local.code}",
                             style = Parity.type.priceSmall, color = c.textSecondary,
                         )
                     }

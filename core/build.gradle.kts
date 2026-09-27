@@ -24,6 +24,9 @@ kotlin {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
+        jvmTest.dependencies {
+            implementation(libs.zxing.core)
+        }
     }
 }
 

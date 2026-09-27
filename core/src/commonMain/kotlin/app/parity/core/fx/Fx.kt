@@ -88,6 +88,18 @@ fun formatPercentPrecise(fraction: BigDecimal, decimals: Int = 10): String {
     return "$sign$text %"
 }
 
+/** A rate for display: at most [significantDigits] significant digits, no trailing zeros. */
+fun formatRate(value: BigDecimal, significantDigits: Int = 8): String = roundSignificant(value, significantDigits).toPlainString()
+
+/** Rounds to [digits] significant digits; used so cross rates don't carry false precision. */
+fun roundSignificant(value: BigDecimal, digits: Int): BigDecimal =
+    value.divide(BigDecimal.ONE, com.ionspin.kotlin.bignum.decimal.DecimalMode(digits.toLong(), com.ionspin.kotlin.bignum.decimal.RoundingMode.ROUND_HALF_AWAY_FROM_ZERO))
+
+private fun BigDecimal.toPlainString(): String {
+    val s = toStringExpanded()
+    return if (s.contains('.')) s.trimEnd('0').trimEnd('.') else s
+}
+
 private fun leadingDigitExponent(positive: BigDecimal): Int {
     val s = positive.toStringExpanded()
     val intPart = s.substringBefore('.')

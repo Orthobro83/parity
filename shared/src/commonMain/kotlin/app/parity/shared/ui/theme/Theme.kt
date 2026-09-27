@@ -87,6 +87,10 @@ fun ParityTheme(fontFamily: FontFamily, trueBlack: Boolean, content: @Composable
         outlineVariant = colors.outline,
         error = colors.down,
         onError = colors.onAccent,
+        // Snackbars use the inverse roles: keep them dark and on-brand.
+        inverseSurface = Color(0xFF262B33),
+        inverseOnSurface = colors.textPrimary,
+        inversePrimary = colors.accent,
     )
     val typography = Typography(
         displayLarge = type.display, headlineMedium = type.headline, headlineSmall = type.headline,

@@ -4,6 +4,8 @@ import app.parity.core.fx.FxDirection
 import app.parity.core.fx.FxIndicator
 import app.parity.core.fx.FxRate
 import app.parity.core.fx.formatPercent
+import app.parity.core.fx.formatRate
+import app.parity.core.fx.roundSignificant
 import app.parity.core.money.Countries
 import app.parity.core.money.Currencies
 import app.parity.core.money.CurrencyCode
@@ -83,5 +85,14 @@ class MoneyAndFxTest {
         assertEquals("−0.387 %", formatPercent(decimal("-0.00387")))
         assertEquals("+12.3 %", formatPercent(decimal("0.1234")))
         assertEquals("+123 %", formatPercent(decimal("1.234")))
+    }
+}
+
+class RateFormatTest {
+    @Test
+    fun ratesAreRoundedToSignificantDigits() {
+        assertEquals("2.6094208", formatRate(decimal("2.6094207691580837191722573939")))
+        assertEquals("0.000011919995", formatRate(decimal("0.000011919995")))
+        assertEquals("2.60942076916", roundSignificant(decimal("2.6094207691580837"), 12).toPlain())
     }
 }

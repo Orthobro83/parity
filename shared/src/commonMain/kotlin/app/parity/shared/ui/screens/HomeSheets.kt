@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.parity.core.fx.formatPercent
 import app.parity.core.fx.formatPercentPrecise
+import app.parity.core.fx.formatRate
 import app.parity.core.money.MoneyFormat
 import app.parity.core.money.MoneyMath
 import app.parity.core.money.decimal
@@ -262,8 +263,12 @@ fun FinalizeDialog(open: List<String>, onKeepShopping: () -> Unit, onFinalize: (
                 }
             }
         },
-        confirmButton = { PillButton("Finalize purchases", onFinalize, height = 44.dp) },
-        dismissButton = { PillButton("Keep Shopping", onKeepShopping, primary = false) },
+        confirmButton = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PillButton("Keep Shopping", onKeepShopping, Modifier.weight(1f), primary = false, height = 48.dp)
+                PillButton("Finalize purchases", onFinalize, Modifier.weight(1f), height = 48.dp)
+            }
+        },
     )
 }
 
@@ -306,8 +311,8 @@ fun FxDetailDialog(card: ScanCard, onDismiss: () -> Unit) {
                         style = Parity.type.body,
                     )
                 }
-                Text("Then: 1 $base = ${indicator.previousRate.toPlain()} $local", style = Parity.type.priceSmall)
-                Text("Now: 1 $base = ${indicator.currentRate.toPlain()} $local", style = Parity.type.priceSmall)
+                Text("Then: 1 $base = ${formatRate(indicator.previousRate, 10)} $local", style = Parity.type.priceSmall)
+                Text("Now: 1 $base = ${formatRate(indicator.currentRate, 10)} $local", style = Parity.type.priceSmall)
                 Text("Change: ${formatPercentPrecise(indicator.change)}", style = Parity.type.priceSmall)
                 if (previous != null) {
                     val oldShelf = decimal(previous.price)

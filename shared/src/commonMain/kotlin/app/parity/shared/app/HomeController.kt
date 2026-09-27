@@ -363,7 +363,7 @@ class HomeController(private val graph: AppGraph) {
             val session = graph.shopping.finalize(items, settings.baseCurrency, settings.country) ?: return@launch
             graph.platform.haptics.success()
             val total = MoneyFormat.format(decimal(session.totalBase), settings.baseCurrency)
-            graph.messages.show("Saved ${items.size} items ($total) to History")
+            graph.messages.show("Saved ${items.size} ${if (items.size == 1) "item" else "items"} ($total) to History")
         }
     }
 }

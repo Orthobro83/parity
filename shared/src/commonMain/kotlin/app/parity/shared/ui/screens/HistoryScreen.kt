@@ -32,11 +32,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.parity.core.fx.formatRate
 import app.parity.core.money.CurrencyCode
 import app.parity.core.money.MoneyFormat
 import app.parity.core.money.MoneyMath
 import app.parity.core.money.decimal
-import app.parity.core.money.toPlain
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.SessionDetail
 import app.parity.shared.data.Settings
@@ -166,7 +166,7 @@ fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit) {
                                     "(${MoneyFormat.format(unitLocal.multiply(qty, MoneyMath), local)})",
                                 style = Parity.type.priceSmall, modifier = Modifier.weight(1f),
                             )
-                            line.fxRate?.let { Text("1 ${base.code} = ${decimal(it).toPlain()} ${local.code}", style = Parity.type.caption, color = c.textSecondary) }
+                            line.fxRate?.let { Text("1 ${base.code} = ${formatRate(decimal(it))} ${local.code}", style = Parity.type.caption, color = c.textSecondary) }
                         }
                     }
                 }

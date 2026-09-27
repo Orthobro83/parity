@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import app.parity.core.money.Countries
 import app.parity.core.money.Currencies
 import app.parity.core.money.Languages
-import app.parity.core.money.toPlain
+import app.parity.core.fx.formatRate
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.RestoreMode
 import app.parity.shared.data.Settings
@@ -145,7 +145,7 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
                     if (settings.baseCurrency == settings.localCurrency) {
                         Text("Your currency and the local currency are the same.", style = Parity.type.caption, color = c.textSecondary)
                     } else if (r != null) {
-                        Text("1 ${r.base.code} = ${r.value.toPlain()} ${r.quote.code}", style = Parity.type.priceSmall)
+                        Text("1 ${r.base.code} = ${formatRate(r.value, 10)} ${r.quote.code}", style = Parity.type.priceSmall)
                         Text(
                             (r.publishedAtMs?.let { "Published ${formatDateTime(it)} · " } ?: "") + "fetched ${formatAge(r.fetchedAtMs, now())}" +
                                 (r.pivot?.let { " · via ${it.code}" } ?: "") + if (rate?.stale == true) " · offline" else "",

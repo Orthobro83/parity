@@ -79,9 +79,20 @@ fun <T> SearchableList(
     }
 }
 
+private val popularCurrencies = listOf("USD", "EUR", "GBP", "CAD", "AUD", "GEL", "CHF", "JPY", "BTC", "ZEC", "ETH", "XMR")
+
+private val popularLanguages = listOf("en", "ka", "ru", "es", "fr", "de", "it", "pt", "tr", "uk")
+
+/** The selected item first, then common choices, then everything else in order. */
+private fun <T> pinned(all: List<T>, selected: T?, popular: List<T>): List<T> =
+    (listOfNotNull(selected) + popular + all).distinct()
+
 @Composable
 fun CurrencyList(selected: CurrencyCode?, onPick: (CurrencyCode) -> Unit, modifier: Modifier = Modifier) {
-    val all = remember { Currencies.all.sortedWith(compareBy<Currency>({ it.isCrypto }, { it.code.code })) }
+    val all = remember(selected) {
+        val sorted = Currencies.all.sortedWith(compareBy<Currency>({ it.isCrypto }, { it.code.code }))
+        pinned(sorted, sorted.firstOrNull { it.code == selected }, popularCurrencies.mapNotNull { Currencies.find(it) })
+    }
     SearchableList(
         items = all,
         selected = all.firstOrNull { it.code == selected },
@@ -95,8 +106,11 @@ fun CurrencyList(selected: CurrencyCode?, onPick: (CurrencyCode) -> Unit, modifi
 
 @Composable
 fun LanguageList(selected: String?, onPick: (String) -> Unit, modifier: Modifier = Modifier) {
+    val all = remember(selected) {
+        pinned(Languages.all, Languages.all.firstOrNull { it.tag == selected }, popularLanguages.mapNotNull { Languages.find(it) })
+    }
     SearchableList(
-        items = Languages.all,
+        items = all,
         selected = Languages.all.firstOrNull { it.tag == selected },
         matches = { l: Language, q -> l.englishName.lowercase().contains(q) || l.nativeName.lowercase().contains(q) || l.tag == q },
         title = { it.englishName },

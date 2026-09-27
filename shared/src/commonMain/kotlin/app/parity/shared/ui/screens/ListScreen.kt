@@ -138,7 +138,8 @@ fun ListScreen(graph: AppGraph) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(category.label.uppercase(), style = Parity.type.caption, color = c.textSecondary, modifier = Modifier.weight(1f))
-                        Text("${group.count { !it.checked }}/${group.size}", style = Parity.type.caption, color = c.textSecondary)
+                        val left = group.count { !it.checked }
+                        Text(if (left == 0) "done" else "$left left", style = Parity.type.caption, color = if (left == 0) c.up else c.textSecondary)
                         Icon(if (isCollapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(20.dp))
                     }
                 }
