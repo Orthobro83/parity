@@ -12,9 +12,9 @@ time.
 > [Releases](https://github.com/Orthobro83/parity/releases). An iPhone version is planned.
 
 <p align="center">
-  <img src="docs/screenshots/scan-georgian.png" width="270" alt="A Georgian price tag converted to US dollars, with the product name translated">
-  <img src="docs/screenshots/currency-indicator.png" width="270" alt="A green triangle showing the dollar gained 0.189 % against the lari since the last scan">
-  <img src="docs/screenshots/multi-buy-deal.png" width="270" alt="Choosing between one item at the regular price and three with a multi-buy deal">
+  <img src="docs/screenshots/scan-georgian.png" width="240" alt="A Georgian price tag converted to US dollars, with the product name translated">
+  <img src="docs/screenshots/currency-indicator.png" width="240" alt="A green triangle showing the dollar gained 0.189 % against the lari since the last scan">
+  <img src="docs/screenshots/multi-buy-deal.png" width="240" alt="Choosing between one item at the regular price and three with a multi-buy deal">
 </p>
 
 ## Features
