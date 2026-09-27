@@ -762,7 +762,25 @@ day one, so the charts can be built later from real Georgia data without losing 
    dependencies such as ML Kit are acceptable.
 
 **Still open**
-- **Package ID** (`applicationId` / bundle ID), for example `com.<you>.parity`. It can't be changed
-  after publishing, so it should be decided before M0.
-- **Test hardware:** an emulator can't meaningfully test price-tag OCR, so a physical Android phone
-  is needed from M1.
+- **Package ID** (`applicationId` / bundle ID). The Phase 1 build uses the placeholder `app.parity`;
+  choose the final ID before the first Play Store upload, after which it can never change.
+- **Real-device testing:** the emulator verified the whole flow, including Georgian OCR on synthetic
+  tags; real shelf photos (glare, angles, store fonts) still need testing on a phone.
+
+---
+
+## 20. As built (Phase 1, 2026-09-27)
+
+Where the Phase 1 build differs from the sections above, and why. PROGRESS.md tracks status.
+
+| Area | Design said | Built | Why |
+|---|---|---|---|
+| QR payload encoding (§8.5) | CBOR + zstd with a dictionary | JSON + DEFLATE, frames in Base45 (QR alphanumeric mode), 700-byte chunks → QR version 22 | Standard platform zlib; still ~4× smaller than raw. Verified with a real QR encode/decode round-trip test |
+| QR backup encryption (§8.5) | 4-word passphrase, Argon2id | 12-character code (Crockford Base32, 60 bits), PBKDF2-SHA256 × 310,000 + AES-256-GCM | Uses built-in platform crypto; no wordlist needed; higher entropy |
+| Classifier (§8.2) | Lexicon + on-device embeddings + overrides | Lexicon (phrases beat words) + user overrides | Embeddings deferred; the lexicon covers the design example exactly |
+| Scanning (§6) | Camera only | Camera **and "scan a photo"** from the gallery | Lets tags be read from photos later, and made Georgian OCR testable on the emulator |
+| Name OCR (§6.2, §14) | Tesseract for unsupported scripts | Tesseract re-reads the **exact frame** the price locked on (frames carry IDs); lines are picked by script; ML Kit's gibberish for non-Latin scripts is never shown | Found in testing: the live camera had moved on before Tesseract ran |
+| Rates (§12) | Full precision | Cross rates rounded to 12 significant digits; display shows up to 8–10 | Providers publish 6–10 digits; 34-digit cross rates were false precision |
+| API keys (§16) | Android Keystore | Stored in the app database, never exported | Phase 1 simplification; only optional providers need keys |
+| Packaging | — | One APK per CPU type (arm64 release ≈ 59 MB) | ML Kit translation/OCR and Tesseract native libraries dominate size |
+| Analytics (§10) | Charts | Phase 1 summary: currency vs local per pair, and per-product change split into shelf price and currency effect | Full charts are M5, after Phase 1; all data is already recorded |

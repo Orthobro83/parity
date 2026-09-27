@@ -46,9 +46,9 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
       superscript tetri (4⁴⁹ ₾ → 4.49) and sale tags (-20 %, was 12.49) parse correctly
 - [ ] Real-device test on a phone (camera OCR, Georgian names) — needs the user's phone over USB
 - [ ] Georgian OCR on real photos (synthetic tags pass; real tags have glare, fonts, angles) — needs the phone
-- [ ] M4: encrypted backup over QR (passphrase, design §8.5) — list sharing by QR already works
+- [x] M4: encrypted all-data transfer by QR (12-char code, PBKDF2 + AES-GCM); lists by QR (unencrypted, per design)
 - [ ] M5 (after Phase 1): full analytics charts
-- [ ] Release build check (R8 keep rules for Tesseract/ML Kit/Room)
+- [x] Release build: R8 keep rules for ML Kit + Tesseract, per-ABI APKs (arm64 release ≈ 59 MB); verified on emulator
 
 ## Decisions made during the build
 
@@ -59,12 +59,24 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 - The shared theme receives its `FontFamily` from the platform, so Compose resources are not needed.
 - QR payloads are JSON + DEFLATE (design said CBOR + zstd); simpler and still ~4× smaller than raw.
 - QR frames are Base45 text so they use the QR alphanumeric mode; 700-byte chunks per frame.
-- Backups over QR are not offered yet: design requires passphrase encryption first (M4).
 - Rate API keys are stored in the app database (not the Keystore yet) and are never exported.
 - Classifier tier 2 (on-device embeddings) is not built; the lexicon + user overrides cover Phase 1.
 - Every locked scan is recorded as an observation; repeats of the same product+price within
   10 minutes reuse the earlier one.
 
+## Install on a phone (Phase 1, sideloaded)
+
+1. On the phone: Settings → About phone → tap "Build number" 7 times, then Settings → System →
+   Developer options → turn on USB debugging. Connect the phone by USB and accept the prompt.
+2. Build and install:
+   ```bash
+   ./gradlew :androidApp:assembleRelease
+   adb install -r androidApp/build/outputs/apk/release/androidApp-arm64-v8a-release.apk
+   ```
+   Or copy that APK to the phone and open it (allow "Install unknown apps" for your file manager).
+
 ## Next step
 
-See the first unchecked item above.
+See the first unchecked item above. Also worth doing next:
+- Rename stores (the repository supports it; there's no UI yet — stores appear as "Store 1", "Store 2").
+- Try real Georgian tags from photos (Home → photo icon) as soon as possible.
