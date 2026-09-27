@@ -105,6 +105,7 @@ data class ShoppingSessionEntity(
     val totalBase: String,
     /** JSON object of local-currency totals, e.g. {"GEL":"113.40"}. */
     val totalsLocalJson: String,
+    val itemCount: Int = 0,
 )
 
 @Serializable

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "f26f7f2f4e0810d7e7f482cfe713950a",
+    "identityHash": "59c31d6cc3769c0b3493a0d713def0c5",
     "entities": [
       {
         "tableName": "settings",
@@ -387,7 +387,7 @@
       },
       {
         "tableName": "shopping_session",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `finalizedAt` INTEGER NOT NULL, `storeId` TEXT, `countryCode` TEXT, `baseCurrency` TEXT NOT NULL, `totalBase` TEXT NOT NULL, `totalsLocalJson` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `finalizedAt` INTEGER NOT NULL, `storeId` TEXT, `countryCode` TEXT, `baseCurrency` TEXT NOT NULL, `totalBase` TEXT NOT NULL, `totalsLocalJson` TEXT NOT NULL, `itemCount` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -433,6 +433,12 @@
             "fieldPath": "totalsLocalJson",
             "columnName": "totalsLocalJson",
             "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemCount",
+            "columnName": "itemCount",
+            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -746,7 +752,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f26f7f2f4e0810d7e7f482cfe713950a')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '59c31d6cc3769c0b3493a0d713def0c5')"
     ]
   }
 }

@@ -217,6 +217,7 @@ class ShoppingRepository(private val db: ParityDatabase) {
             baseCurrency = baseCurrency.code,
             totalBase = totalBase.toPlain(),
             totalsLocalJson = JsonObject(totalsLocal.mapValues { JsonPrimitive(it.value) }).toString(),
+            itemCount = items.size,
         )
         val lines = items.map { item ->
             PurchaseLineEntity(
