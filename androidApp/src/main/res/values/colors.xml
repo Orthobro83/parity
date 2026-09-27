@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="parity_bg">#0B0D10</color>
+    <color name="parity_up">#2BD67B</color>
+    <color name="parity_down">#FF5A5F</color>
+</resources>
