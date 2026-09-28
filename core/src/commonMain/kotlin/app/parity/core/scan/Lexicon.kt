@@ -55,6 +55,10 @@ internal object Lexicon {
         "tk" to listOf("BDT"), "k" to listOf("MMK", "PGK", "ZMW"),
     )
 
+    /** Currency signs that are one symbol (₾, €, $…), for reading a price's crop on its own. */
+    val currencySigns: String = (currencyMarkers.keys + ambiguous.keys + localOnly.keys)
+        .filter { it.length == 1 && !it[0].isLetterOrDigit() }.joinToString("")
+
     fun currencyFor(marker: String, local: CurrencyCode?): CurrencyCode? {
         val key = marker.lowercase()
         if (key.length == 3 && key.all { it.isLetter() }) {

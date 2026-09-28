@@ -6,6 +6,14 @@ package app.parity.core.scan
  * label's own script win, and junk without a real word is dropped.
  */
 object NameText {
+    /**
+     * Tesseract's confidence in a line (0–100) below which it isn't taken for a name (design §14):
+     * the card asks for the name instead. On rendered Georgian shelf text 10–28 px tall, blurred and
+     * noisy, 70 dropped 46 of 51 misreadings and 3 of 125 good readings; 65 kept twice the
+     * misreadings, 75 lost twice the good ones.
+     */
+    const val MIN_CONFIDENCE = 70f
+
     private fun ranges(vararg bounds: Pair<Int, Int>): (Char) -> Boolean = { c -> bounds.any { (from, to) -> c.code in from..to } }
 
     private val georgian = ranges(0x10A0 to 0x10FF, 0x1C90 to 0x1CBF, 0x2D00 to 0x2D2F)

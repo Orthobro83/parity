@@ -26,15 +26,21 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
 /** One word-level piece of recognized text. */
 data class OcrElement(val text: String, val box: Box)
 
-/** One line of recognized text with its words. */
-data class OcrLine(val text: String, val box: Box, val elements: List<OcrElement> = emptyList()) {
+/**
+ * One line of recognized text with its words. [confidence] is the recognizer's own, 0–100, where
+ * it gives one (Tesseract); readings below [NameText.MIN_CONFIDENCE] aren't used as names.
+ */
+data class OcrLine(val text: String, val box: Box, val elements: List<OcrElement> = emptyList(), val confidence: Float? = null) {
     /** The part of this line on [area]: all of it, the words on it (a line read across two tags), or none. */
     fun within(area: TagQuad): OcrLine? {
         if (area.holds(box)) return this
         val kept = elements.filter { area.holds(it.box) }
         if (kept.isEmpty()) return null
-        return OcrLine(kept.joinToString(" ") { it.text }, kept.map { it.box }.reduce(Box::union), kept)
+        return OcrLine(kept.joinToString(" ") { it.text }, kept.map { it.box }.reduce(Box::union), kept, confidence)
     }
+
+    /** Read well enough to be a name, when the recognizer says how well. */
+    val readable: Boolean get() = (confidence ?: 100f) >= NameText.MIN_CONFIDENCE
 }
 
 /** Everything the recognizers found in one camera frame. */
@@ -99,6 +105,12 @@ data class TagQuad(
         val b0 = push(bl, tl, vertical)
         return of(listOf(push(t0, t1, horizontal), push(t1, t0, horizontal), push(b1, b0, horizontal), push(b0, b1, horizontal)), score)
     }
+
+    /**
+     * The tag with a thin margin, so print at its edges isn't cut, for reading it alone with a
+     * script engine: the shelf that a wider margin takes in throws off its layout and contrast.
+     */
+    fun padded(): TagQuad = reach(vertical = 0.06f, horizontal = 0.03f)
 
     /** The same outline in an image scaled by [sx], [sy]. */
     fun scaled(sx: Float, sy: Float = sx): TagQuad = of(corners.map { (x, y) -> x * sx to y * sy }, score)

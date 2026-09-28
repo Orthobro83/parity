@@ -56,8 +56,9 @@ interface CameraScanner {
      * in scripts the fast recognizer can't read, such as Georgian. [languages] are Tesseract codes,
      * e.g. "kat+eng". [textHeight] is the expected height of the letters in frame pixels, if known.
      * Only stills and photos are read (design §6.2): null for a live frame, or one no longer kept.
+     * The lines carry the engine's confidence in them.
      */
-    suspend fun readRegion(frameId: Long, region: Box, languages: String, textHeight: Float? = null): String?
+    suspend fun readRegion(frameId: Long, region: Box, languages: String, textHeight: Float? = null): List<OcrLine>?
 
     /**
      * Reads the text lines, with their boxes in frame coordinates, in [region] of frame [frameId]
@@ -65,6 +66,12 @@ interface CameraScanner {
      * With [quad], that tag is read instead, straightened (design §6.1).
      */
     suspend fun readLines(frameId: Long, region: Box, languages: String, textHeight: Float? = null, quad: TagQuad? = null): List<OcrLine>?
+
+    /**
+     * Reads the price in [box] of frame [frameId] with the script engine allowed only [characters]
+     * (digits, separators, currency signs), to confirm the digits the fast recognizer read.
+     */
+    suspend fun readPrice(frameId: Long, box: Box, languages: String, characters: String): List<OcrLine>?
 
     /** Reads a photo (JPEG/PNG bytes) like a camera frame; it then backs [readRegion]. */
     suspend fun scanImage(bytes: ByteArray): OcrFrame?

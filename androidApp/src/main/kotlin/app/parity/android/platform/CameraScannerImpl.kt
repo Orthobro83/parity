@@ -334,9 +334,9 @@ class CameraScannerImpl(
         return Triple(Bitmap.createBitmap(upright, left, top, right - left, bottom - top), left, top)
     }
 
-    override suspend fun readRegion(frameId: Long, region: Box, languages: String, textHeight: Float?): String? {
-        val (bitmap, _, _) = crop(frameId, region) ?: return null
-        return tesseract.read(bitmap, languages, textHeight)
+    override suspend fun readRegion(frameId: Long, region: Box, languages: String, textHeight: Float?): List<OcrLine>? {
+        val (bitmap, dx, dy) = crop(frameId, region) ?: return null
+        return tesseract.readBlock(bitmap, languages, textHeight)?.map { it.moved(dx, dy) }
     }
 
     override suspend fun readLines(frameId: Long, region: Box, languages: String, textHeight: Float?, quad: TagQuad?): List<OcrLine>? {
@@ -345,16 +345,23 @@ class CameraScannerImpl(
             val image = uprightImage(frameId) ?: return null
             val tag = withContext(Dispatchers.Default) { TagOutlines.straighten(image, quad, TESSERACT_SIDE) }
             if (tag != null) {
-                return tesseract.readLines(tag.bitmap, languages, textHeight?.let { it * tag.scale })?.map { (text, r) ->
-                    OcrLine(text, tag.toImage(r.toBox()))
-                }.also { tag.bitmap.recycle() }
+                return tesseract.readLines(tag.bitmap, languages, textHeight?.let { it * tag.scale })
+                    ?.map { it.copy(box = tag.toImage(it.box)) }
+                    .also { tag.bitmap.recycle() }
             }
         }
         val (bitmap, dx, dy) = crop(frameId, region) ?: return null
-        return tesseract.readLines(bitmap, languages, textHeight)?.map { (text, r) ->
-            OcrLine(text, Box((r.left + dx).toFloat(), (r.top + dy).toFloat(), (r.right + dx).toFloat(), (r.bottom + dy).toFloat()))
-        }
+        return tesseract.readLines(bitmap, languages, textHeight)?.map { it.moved(dx, dy) }
     }
+
+    override suspend fun readPrice(frameId: Long, box: Box, languages: String, characters: String): List<OcrLine>? {
+        // The price with a margin of a quarter of its height, so its edges aren't cut.
+        val pad = box.height * 0.25f
+        val (bitmap, dx, dy) = crop(frameId, Box(box.left - pad, box.top - pad, box.right + pad, box.bottom + pad)) ?: return null
+        return tesseract.readPrice(bitmap, languages, characters, textHeight = box.height * 0.8f)?.map { it.moved(dx, dy) }
+    }
+
+    private fun OcrLine.moved(dx: Int, dy: Int) = copy(box = Box(box.left + dx, box.top + dy, box.right + dx, box.bottom + dy))
 
     override suspend fun scanImage(bytes: ByteArray): OcrFrame? = withContext(Dispatchers.Default) {
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext null

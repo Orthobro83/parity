@@ -64,6 +64,8 @@ internal object NameFinder {
     }
 
     fun isNameLike(line: OcrLine, price: PriceCandidate?): Boolean {
+        // A reading the script engine isn't sure of is no name: a fragment or a misread slogan.
+        if (!line.readable) return false
         val text = line.text.trim()
         val letters = NameText.letterWeight(text)
         if (letters < 3) return false

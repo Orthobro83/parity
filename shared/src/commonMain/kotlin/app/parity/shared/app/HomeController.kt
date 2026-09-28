@@ -349,10 +349,18 @@ class HomeController(private val graph: AppGraph) {
         // the tag is read straightened, bands and all, rather than an area grown from the price.
         val lines = withTimeoutOrNull(12_000) {
             runCatching {
-                graph.platform.camera.readLines(tag.frameId, area, tesseract, textHeight = p.height * 0.5f, quad = tag.tagQuad?.reach())
+                graph.platform.camera.readLines(tag.frameId, area, tesseract, textHeight = p.height * 0.5f, quad = tag.tagQuad?.padded())
             }.getOrNull()
         } ?: return null
-        return withContext(Dispatchers.Default) { PriceTagParser.refine(tag, lines, settings.localCurrency, settings.labelLanguage) }
+        // The price's own crop with digits, separators and currency signs only, to confirm its digits.
+        val priceLines = withTimeoutOrNull(4_000) {
+            runCatching {
+                graph.platform.camera.readPrice(tag.frameId, p, tesseract, PriceTagParser.priceCharacters(settings.localCurrency))
+            }.getOrNull()
+        }.orEmpty()
+        return withContext(Dispatchers.Default) {
+            PriceTagParser.refine(tag, lines, settings.localCurrency, settings.labelLanguage, priceLines)
+        }
     }
 
     private fun ParsedTag.differsFrom(original: ParsedTag): Boolean =

@@ -242,9 +242,9 @@ class NeighbouringTagTest {
     }
 
     @Test
-    fun theScriptAreaIsTheTagWithItsBands() {
+    fun theScriptAreaIsTheTag() {
         val tag = parse(milk + bread, listOf(milkTag))
-        assertEquals(milkTag.reach().bounds, PriceTagParser.scriptArea(tag))
+        assertEquals(milkTag.padded().bounds, PriceTagParser.scriptArea(tag))
         // The name area stays on the tag.
         val region = tag.nameRegion!!
         assertTrue(region.top >= milkTag.reach().bounds.top && region.right <= milkTag.reach().bounds.right, "region $region")

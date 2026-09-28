@@ -138,12 +138,12 @@ object PriceTagParser {
     }
 
     /**
-     * The area around [tag]'s price to read with a script-aware engine: its tag with the bands
-     * around it when the outline was found; otherwise a few lines above and below the price, widened
+     * The area around [tag]'s price to read with a script-aware engine: its tag when the outline
+     * was found; otherwise a few lines above and below the price, widened
      * to take in whole lines of text there, as names often start well left of the price.
      */
     fun scriptArea(tag: ParsedTag): Box? {
-        tag.tagQuad?.let { return it.reach().bounds }
+        tag.tagQuad?.let { return it.padded().bounds }
         val p = tag.price?.box ?: return null
         if (p.width <= 0f || p.height <= 0f) return null // typed in: no image
         val base = Box(p.left - p.width * 1.2f, p.top - p.height * 2.5f, p.right + p.width * 1.2f, p.bottom + p.height * 3.2f)
@@ -154,8 +154,13 @@ object PriceTagParser {
 
     /**
      * The product name in a script-aware engine's reading of a tag's name area, leaving out lines
-     * of deal and sale wording ("შეიძინეთ 3 ცალი", "ფასდაკლება -20%"), which such a read also catches.
+     * of deal and sale wording ("შეიძინეთ 3 ცალი", "ფასდაკლება -20%"), which such a read also catches,
+     * and lines it read too poorly to trust ([OcrLine.readable]).
      */
+    fun pickName(lines: List<OcrLine>?, language: String?): String? =
+        pickName(lines?.filter { it.readable }?.joinToString("\n") { it.text }, language)
+
+    /** [pickName] of plain text, one line per line. */
     fun pickName(raw: String?, language: String?): String? {
         val kept = raw?.lines()?.filterNot { line ->
             val text = Lexicon.canonicalized(line)
@@ -166,14 +171,30 @@ object PriceTagParser {
     }
 
     /**
+     * The only characters the script engine may read in a price's own crop (design §14): ASCII
+     * digits, decimal and grouping separators, currency signs, and the letters of the local
+     * currency's code and of USD and EUR. There a label's letters can't be read as digits ("ც" as 6).
+     * Never for names, wording or a whole photo, where Burmese or Arabic-Indic digits must be read.
+     */
+    fun priceCharacters(local: CurrencyCode?): String =
+        ("0123456789.,'’-" + Lexicon.currencySigns + listOfNotNull(local?.code, "USD", "EUR").joinToString("")).toSet().joinToString("")
+
+    /**
      * Second pass for scripts the fast recognizer can't read (design §14): [textLines] come from a
      * script-aware OCR of the same frame, so deal, sale and per-kilo wording ("3 ცალის ყიდვისას",
      * "ფასდაკლება", "1 კგ-ის ფასი") is understood, while prices still come from the fast recognizer.
+     * [priceLines] are the engine's reading of the price's own crop with [priceCharacters] only.
      *
      * The name comes only from [textLines], preferring lines in [language]'s script: what the fast
      * recognizer made of the tag is gibberish, and its "name" may be stray Latin text elsewhere.
      */
-    fun refine(tag: ParsedTag, scriptLines: List<OcrLine>, local: CurrencyCode? = null, language: String? = null): ParsedTag {
+    fun refine(
+        tag: ParsedTag,
+        scriptLines: List<OcrLine>,
+        local: CurrencyCode? = null,
+        language: String? = null,
+        priceLines: List<OcrLine> = emptyList(),
+    ): ParsedTag {
         val textLines = scriptLines.map { it.withAsciiDigits() }
         val unnamed = tag.copy(name = null, nameBox = null)
         if (tag.candidates.isEmpty() || textLines.isEmpty()) return unnamed
@@ -198,7 +219,7 @@ object PriceTagParser {
         val name = NameFinder.find(textFrame, decided.price, exclude = dealLines, script = script)
         return tag.copy(
             price = decided.price,
-            alternatives = decided.alternatives,
+            alternatives = withCropReading(decided, tag.price, priceLines, localDecimals),
             regularPrice = decided.regularPrice,
             isPromo = decided.isPromo,
             promoSignals = decided.promoSignals,
@@ -207,6 +228,23 @@ object PriceTagParser {
             name = name?.first,
             nameBox = name?.second,
         )
+    }
+
+    /**
+     * The price's own crop read with digits only ([priceLines]) confirms its digits, or, when it
+     * confidently reads another amount there, that amount is offered too (design §6.1): the fast
+     * recognizer can misread a digit, and it still decides the price.
+     */
+    private fun withCropReading(decided: ParsedTag, read: PriceCandidate?, priceLines: List<OcrLine>, localDecimals: Int): List<PriceCandidate> {
+        val price = decided.price ?: return decided.alternatives
+        // Only for the price the crop was taken around, not a deal's price standing in for it.
+        if (read == null || price.box != read.box || price.amount.compareTo(read.amount) != 0) return decided.alternatives
+        val amounts = priceLines.filter { it.readable }.flatMap { AmountParser.findNumbers(Digits.normalize(it.text), localDecimals) }
+            .filter { it.decimals == price.decimals && it.amount.signum() > 0 }
+        if (amounts.isEmpty() || amounts.any { it.amount.compareTo(price.amount) == 0 }) return decided.alternatives
+        val other = amounts.first()
+        if (decided.regularPrice?.compareTo(other.amount) == 0) return decided.alternatives
+        return (decided.alternatives + price.copy(amount = other.amount, raw = other.raw)).distinctBy { it.amount.toStringExpanded() }.take(2)
     }
 
     /**

@@ -3,12 +3,25 @@ package app.parity.android.platform
 /**
  * Tesseract models downloaded when a country's labels need them (design §14), pinned to the
  * tessdata_fast 4.1.0 release and checked against these SHA-256 digests before use. Georgian,
- * Russian and English ship in the app.
+ * Russian and English ship in the app ([bundled]).
  */
 internal object TessdataModels {
     const val BASE_URL = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/"
 
     class Model(val bytes: Long, val sha256: String)
+
+    /**
+     * Models in assets/tessdata, copied to app storage on first use and again when an update
+     * ships another version. Georgian is tessdata_best 4.1.0 (float LSTM, 4.5 MB): Georgia is the
+     * first market, and on blurred small print it misread less than tessdata_fast (2.5 MB) or
+     * tessdata's integer LSTM with the legacy engine (8.7 MB; PROGRESS.md). Russian and English
+     * stay tessdata_fast 4.1.0, like the downloads.
+     */
+    val bundled: Map<String, Model> = mapOf(
+        "kat" to Model(4487336, "557f48b753fdbbee2c77d83bae2542af249f915be6cf80883892a579ea2a81db"),
+        "rus" to Model(3861738, "e16e5e036cce1d9ec2b00063cf8b54472625b9e14d893a169e2b0dedeb4df225"),
+        "eng" to Model(4113088, "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"),
+    )
 
     val downloadable: Map<String, Model> = mapOf(
         "amh" to Model(5470094, "3ec3311833a108e07d58a1152b00c0cf1848752e4f85769d46e8ca2b718a2ccc"),

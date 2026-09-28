@@ -6,7 +6,8 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
-import android.graphics.Rect
+import app.parity.core.scan.Box
+import app.parity.core.scan.OcrLine
 import com.googlecode.tesseract.android.TessBaseAPI
 import android.os.SystemClock
 import android.util.Log
@@ -22,7 +23,8 @@ import java.security.MessageDigest
 /**
  * Tesseract for labels in scripts ML Kit can't read, such as Georgian or Armenian (design §14).
  * Georgian, Russian and English models ship in assets/tessdata and are copied to app storage on
- * first use; the others are downloaded when a country needs them ([TessdataModels]).
+ * first use; the others are downloaded when a country needs them ([TessdataModels]). Every line
+ * read carries Tesseract's confidence in it, 0–100.
  */
 private const val TAG = "ParityOcr"
 
@@ -33,91 +35,105 @@ class TesseractReader(private val context: Context) {
     private var loadedLanguages: String? = null
     private val dataDir by lazy { File(context.filesDir, "tesseract") }
 
-    /** Reads [bitmap] as one block of text. [textHeight] is the expected height of its letters, if known. */
-    suspend fun read(bitmap: Bitmap, languages: String, textHeight: Float? = null): String? = withContext(Dispatchers.Default) {
+    /** Lines of [bitmap] read as one block of text: a small area such as a name. */
+    suspend fun readBlock(bitmap: Bitmap, languages: String, textHeight: Float? = null): List<OcrLine>? = withContext(Dispatchers.Default) {
         mutex.withLock {
-            val started = SystemClock.elapsedRealtime()
             val tess = engineFor(languages) ?: return@withLock null
-            val ready = SystemClock.elapsedRealtime()
-            val prepared = prepare(bitmap, scaleFor(bitmap, textHeight))
-            if (Log.isLoggable(TAG, Log.VERBOSE)) {
-                runCatching { File(context.cacheDir, "ocr_last.png").outputStream().use { prepared.compress(Bitmap.CompressFormat.PNG, 100, it) } }
-            }
-            try {
-                tess.setImage(prepared)
-                tess.getUTF8Text()?.trim()?.takeIf { it.isNotEmpty() }.also {
-                    Log.d(TAG, "read ${prepared.width}x${prepared.height} in ${SystemClock.elapsedRealtime() - ready} ms (init ${ready - started} ms): $it")
-                }
-            } finally {
-                tess.clear()
-                if (prepared !== bitmap) prepared.recycle()
-            }
+            recognizeLines(tess, bitmap, TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK, scaleFor(bitmap, textHeight))
         }
     }
 
     /**
      * Text lines with bounding boxes in [bitmap] coordinates. Automatic page segmentation reads
-     * banners and prices best but can find nothing at all on a busy background (a tag photographed
-     * on a screen, glare); then sparse-text mode and a larger upscale are tried until words turn up.
-     * [textHeight] is the expected height of the tag's smaller text, if known.
+     * banners and prices best but can misread a tag's lines or find nothing at all on a busy
+     * background (a tag photographed on a screen, glare); then the tag is read as one block of
+     * lines, in sparse-text mode, and larger. The first attempt that reads the label's own script
+     * confidently is taken; otherwise the one that read it with the most confidence, or failing any
+     * script, the most letters. [textHeight] is the expected height of the tag's smaller text.
      */
-    suspend fun readLines(bitmap: Bitmap, languages: String, textHeight: Float? = null): List<Pair<String, Rect>>? = withContext(Dispatchers.Default) {
+    suspend fun readLines(bitmap: Bitmap, languages: String, textHeight: Float? = null): List<OcrLine>? = withContext(Dispatchers.Default) {
         mutex.withLock {
             val tess = engineFor(languages) ?: return@withLock null
             val scale = scaleFor(bitmap, textHeight)
             val larger = minOf(scale * 2, 3f, MAX_SIDE / maxOf(bitmap.width, bitmap.height).toFloat())
             val attempts = buildList {
                 add(TessBaseAPI.PageSegMode.PSM_AUTO to scale)
+                // A straightened tag is one block of stacked lines; automatic layout can split them
+                // oddly (on a rendered juice tag it misread the name where this read it right).
+                add(TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK to scale)
                 add(TessBaseAPI.PageSegMode.PSM_SPARSE_TEXT to scale)
                 if (larger >= scale * 1.4f) add(TessBaseAPI.PageSegMode.PSM_AUTO to larger)
             }
-            try {
-                // Stop once a line has a word's worth of letters beyond Latin (the label's own script:
-                // a big price can make automatic layout skip the name, "0 ر.س"); otherwise keep the
-                // attempt that found the most.
-                var best: List<Pair<String, Rect>> = emptyList()
-                for ((mode, attemptScale) in attempts) {
-                    val lines = recognizeLines(tess, bitmap, mode, attemptScale)
-                    if (lines.any { (text, _) -> scriptLetters(text) >= 3 }) return@withLock lines
-                    if (letters(lines) > letters(best)) best = lines
+            var best: List<OcrLine> = emptyList()
+            var bestConfidence = -1f
+            for ((mode, attemptScale) in attempts) {
+                val lines = recognizeLines(tess, bitmap, mode, attemptScale)
+                // Lines with a word's worth of letters beyond Latin: the label's own script (a big
+                // price can make automatic layout skip the name, "0 ر.س").
+                val script = lines.filter { scriptLetters(it.text) >= 3 }
+                val confidence = if (script.isEmpty()) -1f else script.map { it.confidence ?: 0f }.average().toFloat()
+                if (confidence >= GOOD_CONFIDENCE) return@withLock lines
+                if (confidence > bestConfidence || (confidence < 0f && bestConfidence < 0f && letters(lines) > letters(best))) {
+                    best = lines
+                    bestConfidence = confidence
                 }
-                best
-            } finally {
-                tess.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK)
             }
+            best
         }
     }
+
+    /**
+     * A price's own crop read as one line with only [characters] allowed (digits, separators,
+     * currency signs), so a label's letters can't turn into digits there. Never used for names.
+     */
+    suspend fun readPrice(bitmap: Bitmap, languages: String, characters: String, textHeight: Float? = null): List<OcrLine>? =
+        withContext(Dispatchers.Default) {
+            mutex.withLock {
+                val tess = engineFor(languages) ?: return@withLock null
+                tess.setVariable(TessBaseAPI.VAR_CHAR_WHITELIST, characters)
+                try {
+                    recognizeLines(tess, bitmap, TessBaseAPI.PageSegMode.PSM_SINGLE_LINE, scaleFor(bitmap, textHeight))
+                } finally {
+                    tess.setVariable(TessBaseAPI.VAR_CHAR_WHITELIST, "")
+                }
+            }
+        }
 
     /** Letters outside Latin, where a label's own script is. */
     private fun scriptLetters(text: String) = text.count { it.isLetter() && it.code > 0x24F }
 
-    private fun letters(lines: List<Pair<String, Rect>>) = lines.sumOf { (text, _) -> text.count { it.isLetter() } }
+    private fun letters(lines: List<OcrLine>) = lines.sumOf { line -> line.text.count { it.isLetter() } }
 
-    private fun recognizeLines(tess: TessBaseAPI, bitmap: Bitmap, mode: Int, scale: Float): List<Pair<String, Rect>> {
+    private fun recognizeLines(tess: TessBaseAPI, bitmap: Bitmap, mode: Int, scale: Float): List<OcrLine> {
         val prepared = prepare(bitmap, scale)
         val started = SystemClock.elapsedRealtime()
+        if (Log.isLoggable(TAG, Log.VERBOSE)) {
+            runCatching { File(context.cacheDir, "ocr_last.png").outputStream().use { prepared.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+        }
         try {
             tess.setPageSegMode(mode)
             tess.setImage(prepared)
             tess.getUTF8Text() // runs recognition
             val iterator = tess.getResultIterator() ?: return emptyList()
-            val lines = mutableListOf<Pair<String, Rect>>()
+            val lines = mutableListOf<OcrLine>()
             try {
                 iterator.begin()
                 do {
                     val text = iterator.getUTF8Text(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)?.trim()
                     val r = iterator.getBoundingRect(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
                     if (!text.isNullOrEmpty() && r != null) {
-                        lines += text to Rect((r.left / scale).toInt(), (r.top / scale).toInt(), (r.right / scale).toInt(), (r.bottom / scale).toInt())
+                        val box = Box(r.left / scale, r.top / scale, r.right / scale, r.bottom / scale)
+                        lines += OcrLine(text, box, confidence = iterator.confidence(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE))
                     }
                 } while (iterator.next(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE))
             } finally {
                 iterator.delete()
             }
-            Log.d(TAG, "lines psm=$mode ${prepared.width}x${prepared.height} in ${SystemClock.elapsedRealtime() - started} ms: ${lines.joinToString(" | ") { it.first }}")
+            Log.d(TAG, "lines psm=$mode ${prepared.width}x${prepared.height} in ${SystemClock.elapsedRealtime() - started} ms: ${lines.joinToString(" | ") { "${it.text} (${it.confidence?.toInt()})" }}")
             return lines
         } finally {
             tess.clear()
+            tess.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK)
             if (prepared !== bitmap) prepared.recycle()
         }
     }
@@ -140,23 +156,11 @@ class TesseractReader(private val context: Context) {
             val connection = URL(TessdataModels.BASE_URL + "$language.traineddata").openConnection() as HttpURLConnection
             connection.connectTimeout = 15_000
             connection.readTimeout = 30_000
-            val digest = MessageDigest.getInstance("SHA-256")
-            try {
-                connection.inputStream.use { input ->
-                    partial.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            val n = input.read(buffer)
-                            if (n < 0) break
-                            digest.update(buffer, 0, n)
-                            output.write(buffer, 0, n)
-                        }
-                    }
-                }
+            val sha = try {
+                connection.inputStream.use { input -> copyHashed(input, partial) }
             } finally {
                 connection.disconnect()
             }
-            val sha = digest.digest().joinToString("") { "%02x".format(it) }
             // Only a file with exactly the pinned contents is used.
             check(partial.length() == model.bytes && sha == model.sha256) { "$language model doesn't match its checksum" }
             check(partial.renameTo(target)) { "couldn't store the $language model" }
@@ -168,6 +172,21 @@ class TesseractReader(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    /** Copies [input] to [target] and returns the SHA-256 of what was copied. */
+    private fun copyHashed(input: java.io.InputStream, target: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        target.outputStream().use { output ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                digest.update(buffer, 0, n)
+                output.write(buffer, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun engineFor(languages: String): TessBaseAPI? {
         if (loadedLanguages == languages) return api
         // Every model is needed: English alone would read another script as Latin gibberish.
@@ -175,28 +194,40 @@ class TesseractReader(private val context: Context) {
         api?.recycle()
         api = null
         loadedLanguages = null
+        val started = SystemClock.elapsedRealtime()
         val engine = TessBaseAPI()
         if (!engine.init(dataDir.absolutePath, languages)) {
+            Log.w(TAG, "Tesseract couldn't load $languages")
             engine.recycle()
             return null
         }
+        Log.d(TAG, "loaded $languages in ${SystemClock.elapsedRealtime() - started} ms (Tesseract ${engine.version})")
         engine.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK)
         api = engine
         loadedLanguages = languages
         return engine
     }
 
-    /** True when [language]'s model is on the phone, copying it from the app if it ships there. */
+    /**
+     * True when [language]'s model is on the phone. One the app ships is copied from it, checked
+     * against its pinned digest, on first use and whenever an update ships another version.
+     */
     private fun ensureModel(language: String): Boolean {
         val target = File(dataDir, "tessdata/$language.traineddata")
-        if (target.exists() && target.length() > 0) return true
-        if (language in TessdataModels.downloadable) return false
+        val shipped = TessdataModels.bundled[language]
+        if (target.length() > 0 && (shipped == null || target.length() == shipped.bytes)) return true
+        shipped ?: return false
+        val partial = File(target.path + ".part")
         return runCatching {
             target.parentFile?.mkdirs()
-            context.assets.open("tessdata/$language.traineddata").use { input ->
-                target.outputStream().use { input.copyTo(it) }
-            }
+            val sha = context.assets.open("tessdata/$language.traineddata").use { copyHashed(it, partial) }
+            check(partial.length() == shipped.bytes && sha == shipped.sha256) { "shipped $language model doesn't match its checksum" }
+            target.delete()
+            check(partial.renameTo(target)) { "couldn't store the $language model" }
             true
+        }.onFailure {
+            Log.w(TAG, "model $language not installed", it)
+            partial.delete()
         }.getOrDefault(false)
     }
 
@@ -263,5 +294,11 @@ class TesseractReader(private val context: Context) {
     private companion object {
         /** Longest side of an image handed to Tesseract, to bound its time on a phone. */
         const val MAX_SIDE = 2400f
+
+        /**
+         * Mean confidence in the script's lines at which an attempt is taken without trying the
+         * others: above the name threshold ([app.parity.core.scan.NameText.MIN_CONFIDENCE]).
+         */
+        const val GOOD_CONFIDENCE = 80f
     }
 }
