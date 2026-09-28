@@ -315,9 +315,12 @@ fun DealDialog(card: ScanCard, onSave: (MultiBuyOffer?) -> Unit, onDismiss: () -
     )
 }
 
-/** The expanded running total: every cart line, adjustable, swipe right to remove (design §7). */
+/**
+ * The expanded running total: every cart line, adjustable, swipe right to remove (design §7), and
+ * Finalize to save the trip to History (§11.1).
+ */
 @Composable
-fun CartSheet(graph: AppGraph, settings: Settings, onDismiss: () -> Unit) {
+fun CartSheet(graph: AppGraph, settings: Settings, onDismiss: () -> Unit, onFinalize: () -> Unit) {
     val items by graph.home.cart.collectAsState()
     val summary by graph.home.summary.collectAsState()
     ParitySheet(onDismiss, skipPartial = false) {
@@ -356,6 +359,10 @@ fun CartSheet(graph: AppGraph, settings: Settings, onDismiss: () -> Unit) {
             items(items, key = { it.line.id }) { item ->
                 CartRow(item, settings, onQuantity = { graph.home.setQuantity(item, it) }, onRemove = { graph.home.remove(item) })
             }
+        }
+        if (items.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            PillButton("Finalize (${summary?.count ?: items.size})", onFinalize, Modifier.fillMaxWidth())
         }
     }
 }

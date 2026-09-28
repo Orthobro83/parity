@@ -100,7 +100,7 @@ import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Home: camera, running total, result card, list strip and Finalize (design §4.1). */
+/** Home: camera, running total, result card and list strip; Finalize is in the cart (design §4.1). */
 @Composable
 fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
     val home = graph.home
@@ -225,19 +225,6 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
             }
 
             ListStrip(listItems, onToggle = graph.listController::toggle)
-
-            AnimatedVisibility(summary != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-                PillButton(
-                    text = "Finalize (${summary?.count ?: 0})",
-                    onClick = {
-                        scope.launch {
-                            val open = home.unpurchasedListItems()
-                            if (open.isEmpty()) home.finalize() else finalizeItems = open
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                )
-            }
             Spacer(Modifier.height(12.dp))
         }
     }
@@ -249,7 +236,20 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
             onDismiss = { buying = null },
         )
     }
-    if (showCart) CartSheet(graph, settings, onDismiss = { showCart = false })
+    if (showCart) {
+        // Finalize is in the cart (design §11.1): with list items still open, "Are you sure?" first.
+        CartSheet(graph, settings, onDismiss = { showCart = false }, onFinalize = {
+            scope.launch {
+                val open = home.unpurchasedListItems()
+                if (open.isEmpty()) {
+                    home.finalize()
+                    showCart = false
+                } else {
+                    finalizeItems = open
+                }
+            }
+        })
+    }
     if (manualEntry) {
         ManualEntrySheet(settings, onShow = { price, name, deal -> home.manualEntry(price, name, deal); manualEntry = false }, onDismiss = { manualEntry = false })
     }
@@ -258,7 +258,11 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
         DealDialog(home.card.value ?: c, onSave = { home.setMultiBuy(it); editingDeal = null }, onDismiss = { editingDeal = null })
     }
     finalizeItems?.let { open ->
-        FinalizeDialog(open, onKeepShopping = { finalizeItems = null }, onFinalize = { home.finalize(); finalizeItems = null })
+        FinalizeDialog(open, onKeepShopping = { finalizeItems = null }, onFinalize = {
+            home.finalize()
+            finalizeItems = null
+            showCart = false
+        })
     }
     editingName?.let { c ->
         EditNameDialog(c.name ?: c.originalName ?: "", onSave = { home.rename(it); editingName = null }, onDismiss = { editingName = null })
