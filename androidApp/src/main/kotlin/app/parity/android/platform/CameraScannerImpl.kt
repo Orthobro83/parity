@@ -49,6 +49,7 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import app.parity.core.scan.TextScript
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
@@ -270,12 +271,13 @@ class CameraScannerImpl(
                         text = line.text,
                         box = box.toBox(),
                         elements = line.elements.mapNotNull { e -> e.boundingBox?.let { OcrElement(e.text, it.toBox()) } },
+                        confidence = line.parityConfidence(),
                     )
                 }
             }
             if (now - lastLogged > 2_000 && Log.isLoggable("ParityOcr", Log.VERBOSE)) {
                 lastLogged = now
-                Log.v("ParityOcr", "live ${width}x$height ($script): ${lines.joinToString(" | ") { it.text }} · tags ${quads.map { it.bounds }}")
+                Log.v("ParityOcr", "live ${width}x$height ($script): ${lines.joinToString(" | ") { "${it.text} (${it.confidence?.toInt()})" }} · tags ${quads.map { it.bounds }}")
             }
             onFrame.value(OcrFrame(lines, width, height, productCodes, frameId, quads))
         }
@@ -446,11 +448,11 @@ class CameraScannerImpl(
         val lines = text?.textBlocks.orEmpty().flatMap { block ->
             block.lines.mapNotNull { line ->
                 val box = line.boundingBox ?: return@mapNotNull null
-                OcrLine(line.text, box.toBox(), line.elements.mapNotNull { e -> e.boundingBox?.let { OcrElement(e.text, it.toBox()) } })
+                OcrLine(line.text, box.toBox(), line.elements.mapNotNull { e -> e.boundingBox?.let { OcrElement(e.text, it.toBox()) } }, line.parityConfidence())
             }
         }
         if (Log.isLoggable("ParityOcr", Log.VERBOSE)) {
-            Log.v("ParityOcr", "photo ${bitmap.width}x${bitmap.height}: ${lines.joinToString(" | ") { "${it.text} @${it.box}" }} · tags ${quads.map { it.bounds }}")
+            Log.v("ParityOcr", "photo ${bitmap.width}x${bitmap.height}: ${lines.joinToString(" | ") { "${it.text} (${it.confidence?.toInt()}) @${it.box}" }} · tags ${quads.map { it.bounds }}")
             runCatching { File(context.cacheDir, "photo_last.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         }
         return OcrFrame(
@@ -479,6 +481,14 @@ class CameraScannerImpl(
     }
 
     private fun Rect.toBox() = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+
+    /**
+     * ML Kit's confidence in a line, on the scale Parity's name threshold is set on (Tesseract's,
+     * [app.parity.core.scan.NameText.MIN_CONFIDENCE]). ML Kit's runs about ten points lower: on
+     * the emulator its readings of Latin names scored 79–90 and its readings of Georgian and Thai
+     * writing, which it can't read, 27–58, so 60 on its scale counts as 70. Null when it gives none.
+     */
+    private fun Text.Line.parityConfidence(): Float? = confidence.takeIf { it > 0f }?.let { (it * 100f + 10f).coerceAtMost(100f) }
 
     private companion object {
         /** Longest side of a straightened tag handed to Tesseract. */

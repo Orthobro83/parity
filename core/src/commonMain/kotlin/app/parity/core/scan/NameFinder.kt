@@ -28,7 +28,7 @@ internal object NameFinder {
         val scored = usable.map { (_, line) ->
             val letters = NameText.letterWeight(line.text)
             var score = minOf(letters, 30) / 30.0
-            if (script != null && line.text.count(script) >= 2) score += 0.8
+            if (script != null && NameText.scriptRun(line.text, script) >= 3) score += 0.8
             // A name says what the product is and how much of it; marketing shouts.
             if (Advertising.hasQuantity(line.text)) score += 0.4
             score -= 0.6 * Advertising.share(line.text)
@@ -53,9 +53,11 @@ internal object NameFinder {
 
         // Names often wrap onto a second line of the same size just below or above, in the same
         // script, and in capitals only if the name is.
-        val bestInScript = script != null && bestLine.text.count(script) >= 2
+        val bestInScript = script != null && NameText.scriptRun(bestLine.text, script) >= 3
         val bestShouts = shouts(bestLine)
-        val partner = usable.map { it.value }.filter { it !== bestLine && (!bestInScript || it.text.count(script!!) >= 2) && (bestShouts || !shouts(it)) }.firstOrNull { other ->
+        val partner = usable.map { it.value }.filter {
+            it !== bestLine && (!bestInScript || NameText.scriptRun(it.text, script!!) >= 3) && (bestShouts || !shouts(it))
+        }.firstOrNull { other ->
             val sameSize = other.box.height in (bestLine.box.height * 0.65f)..(bestLine.box.height * 1.35f)
             val gap = if (other.box.top >= bestLine.box.bottom) other.box.top - bestLine.box.bottom else bestLine.box.top - other.box.bottom
             sameSize && gap in (-bestLine.box.height * 0.2f)..(bestLine.box.height * 0.8f) &&
@@ -115,8 +117,9 @@ internal object NameFinder {
 
     /**
      * Whether a line may be a name. Only its words and place rule it out, never its letter case:
-     * deal and sale wording or a slogan (the promotion vocabulary, a discount, a multi-buy), units
-     * alone, a price per unit, the price's own row, or a reading the script engine isn't sure of.
+     * deal and sale wording or a slogan (the promotion vocabulary, a discount, a multi-buy), units,
+     * prices or currencies alone, a price per unit, the price's own row, no real word at all, or a
+     * reading the recognizer isn't sure of.
      */
     fun isNameLike(line: OcrLine, price: PriceCandidate?): Boolean {
         // A reading the script engine isn't sure of is no name: a fragment or a misread slogan.
@@ -127,6 +130,8 @@ internal object NameFinder {
         if (isUnitPriceLine(text)) return false
         val nonSpace = text.count { !it.isWhitespace() }
         if (letters.toFloat() / nonSpace < 0.5f) return false
+        // A real word, not OCR junk made of a letter or two between marks ("A @s @a Ma QR").
+        if (!NameText.hasWord(text)) return false
         // Deal banners and slogans ("Super Discount", "Celebra tus ahorros", "2 for 1") aren't names.
         if (Advertising.isAdvertising(text)) return false
         // What it's sold by, not what it is: "წონა 1 კგ", "each", "per kg".

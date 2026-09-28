@@ -27,8 +27,9 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
 data class OcrElement(val text: String, val box: Box)
 
 /**
- * One line of recognized text with its words. [confidence] is the recognizer's own, 0–100, where
- * it gives one (Tesseract); readings below [NameText.MIN_CONFIDENCE] aren't used as names.
+ * One line of recognized text with its words. [confidence] is how sure the recognizer is of it,
+ * 0–100 on Tesseract's scale (ML Kit's is put on it by its adapter), where it says; readings below
+ * [NameText.MIN_CONFIDENCE] aren't used as names.
  */
 data class OcrLine(val text: String, val box: Box, val elements: List<OcrElement> = emptyList(), val confidence: Float? = null) {
     /** The part of this line on [area]: all of it, the words on it (a line read across two tags), or none. */

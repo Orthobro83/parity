@@ -146,16 +146,30 @@ internal object Lexicon {
     )
 
     /**
-     * [text] with near-misses of those words ("შეიძინეტ", "ფასდაკლებს") spelled right, so deal and
-     * sale wording is still recognized. Only used for matching keywords, never for names.
+     * Keywords in scripts other than Latin, which script OCR often gets a letter wrong in: Georgian
+     * deal, sale and unit words, and every script's words for price, sale and currency ("ราคา" read
+     * as "ฐาคา" on a stylised Thai sign).
      */
-    fun canonicalized(text: String): String = Regex("\\p{L}+").replace(text) { m ->
+    private val scriptKeywords: List<String> by lazy {
+        (georgianKeywords + boilerplate + promoWords + currencyNames)
+            .filter { k -> k.length >= 4 && k.any { it.isLetter() && it.code > 0x24F } }.distinct()
+    }
+
+    /**
+     * [text] with near-misses of those words ("შეიძინეტ", "ფასდაკლებს", "ฐาคา") spelled right, so
+     * deal, sale and price wording is still recognized. Only used for matching keywords, never
+     * for names. A word in one script is never near a keyword in another: they share no letters.
+     */
+    fun canonicalized(text: String): String = WORD.replace(text) { m ->
         val word = m.value
-        if (word.length < 4 || word.none { it in 'Ⴀ'..'ჿ' } || word in georgianKeywords) return@replace word
-        georgianKeywords.firstOrNull { k ->
+        if (word.length < 4 || word.none { it.isLetter() && it.code > 0x24F } || word in scriptKeywords) return@replace word
+        scriptKeywords.firstOrNull { k ->
             kotlin.math.abs(k.length - word.length) <= 1 && editDistance(k, word) <= (if (k.length >= 7) 2 else 1)
         } ?: word
     }
+
+    /** A word: letters with the vowel signs that belong to them (Thai, Hindi, Tamil…). */
+    private val WORD = Regex("[\\p{L}\\p{M}]+")
 
     private fun editDistance(a: String, b: String): Int {
         var prev = IntArray(b.length + 1) { it }
@@ -170,9 +184,29 @@ internal object Lexicon {
         return prev[b.length]
     }
 
-    /** Lines made only of these words are never product names. */
+    /**
+     * Lines made only of these words are never product names: "price" in the languages of shelf
+     * tags ("ราคา" alone on a Thai sign), codes and totals. Latin words without accents.
+     */
     val boilerplate = setOf(
-        "price", "prix", "preis", "precio", "prezzo", "цена", "ფასი", "ფასი:", "barcode", "code", "код", "კოდი",
-        "art", "art.", "sku", "plu", "gel", "usd", "eur", "ლარი", "total", "sum",
+        "price", "prix", "preis", "precio", "prezzo", "preco", "prijs", "pris", "hinta", "hind", "cena", "cijena", "pret",
+        "kaina", "fiyat", "fiyati", "harga", "presyo", "gia", "bei", "cmimi",
+        "цена", "ціна", "цана", "кошт", "баға", "үнэ", "ფასი", "ფასი:", "գին", "τιμή", "מחיר", "السعر", "سعر", "قیمت",
+        "मूल्य", "कीमत", "किंमत", "দাম", "মূল্য", "விலை", "ధర", "ಬೆಲೆ", "വില", "કિંમત", "ਕੀਮਤ", "මිල", "ราคา", "ລາຄາ",
+        "តម្លៃ", "ဈေးနှုန်း", "ዋጋ", "价格", "價格", "售价", "售價", "価格", "値段", "売価", "가격", "판매가",
+        "barcode", "code", "код", "კოდი", "art", "art.", "sku", "plu", "gel", "usd", "eur", "ლარი", "total", "sum",
     )
+
+    /** Names of currencies printed as words ("บาท", "ლარი", "baht"): a line of these alone isn't a name. */
+    private val currencyNames = setOf(
+        "dollar", "dollars", "peso", "pesos", "yen", "yuan", "rupee", "rupees", "dirham", "dinar", "riyal", "rial", "lira",
+        "baht", "dong", "rupiah", "ringgit", "kip", "riel", "kyat", "taka", "rand", "zloty", "forint", "koruna", "leu", "lev",
+        "manat", "tenge", "dram", "lek", "denar", "franc", "francs", "krone", "kronor", "krona", "euro", "euros", "lari",
+        "cent", "cents", "centavos", "centimes", "рубль", "рублей", "гривня", "гривень", "тенге", "бат", "บาท", "สตางค์",
+        "ກີບ", "រៀល", "ကျပ်", "টাকা", "रुपये", "रुपया", "रुपए", "ரூபாய்", "ريال", "درهم", "دينار", "جنيه", "ליר", "שקל",
+    )
+
+    /** True when [word] (lower case) is a currency's sign, code or name. */
+    fun isCurrencyWord(word: String): Boolean =
+        word in currencyMarkers || word in ambiguous || word in localOnly || word in currencyNames
 }

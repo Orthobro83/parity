@@ -322,7 +322,14 @@ CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
   shutter's photos and gallery photos are read by Tesseract (0.3.0-beta.5); without a still there's
   no name rather than a guess from the live frame. Tesseract reads the tag's outline straightened.
 - **Only confident readings are names** (0.3.0-beta.5). Tesseract says how sure it is of each line
-  (0–100). Below 70 a reading is never a name: the card asks for it instead. See §14.
+  (0–100). Below 70 a reading is never a name: the card asks for it instead. See §14. Since
+  0.3.0-beta.6 ML Kit's own confidence counts the same way: its readings of writing it can't read
+  (a Georgian or Thai tag while the labels are set to Latin) score low and are never names.
+- **A name has a real word** (0.3.0-beta.6): three letters' worth or more with nothing but letters
+  and their vowel signs in it, and in a label's own script a word of that script, not a few of its
+  letters among OCR junk ("A @s @a Ma ลห QR 0ป"). "Price" in about 40 languages ("ราคา", "मूल्य",
+  "السعر", "цена"), a currency's name alone ("บาท") and near-misses of them ("ฐาคา") aren't names
+  either.
 - **What a name isn't.** Letter case never rules a line out: names are often printed in capitals
   ("CHICKEN BREAST"). A line is left out for its words or its place: the marketing and sale
   vocabulary, deal and discount wording ("1+1", "2x1", "3 for 2", "-20%", "50% off"), units alone
@@ -817,6 +824,11 @@ label language has a reader. A test checks both for all 245 countries.
     never a name. On rendered Georgian shelf text 10–28 px tall, blurred and noisy, 70 dropped 46
     of 51 misreadings and 3 of 125 good readings; 65 kept twice the misreadings, 75 lost twice the
     good ones.
+  - **ML Kit's confidence** is put on Tesseract's scale by adding 10: on the emulator ML Kit gave
+    Latin names 79–90 and its readings of Georgian and Thai writing 27–58, so its 60 counts as 70.
+  - **The whole-photo fallback** (prices ML Kit found none of) only takes numbers written in the
+    labels' own digits (Burmese ၁၀၀၀, Thai ๘๘): plain digits are ML Kit's to read, and Tesseract's
+    plain digits there were misread letters on a stylised Thai sign.
   - **The price's own crop** is read once more with only digits, separators, currency signs and the
     letters of the local currency's code, USD and EUR allowed, so a letter can't turn into a digit
     there. It confirms the fast recognizer's digits; a confident different reading is offered as

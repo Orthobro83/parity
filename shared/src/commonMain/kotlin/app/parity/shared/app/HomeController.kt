@@ -402,14 +402,15 @@ class HomeController(private val graph: AppGraph) {
         tesseract ?: return null
         // The pass over the whole tag, whose name skips deal and promotion wording.
         val fromTag = refined?.name?.let { NameText.pickLines(it, language) }
-        if (NameText.isInScript(fromTag, language) && !readsPartly(fromTag, refined?.nameBox, tag.lines)) return fromTag
+        // A name in the label's script has a word of it, not stray letters of it among OCR junk.
+        if (NameText.isScriptName(fromTag, language) && !readsPartly(fromTag, refined?.nameBox, tag.lines)) return fromTag
         // A focused read of the name area, for when that pass missed the line or part of it.
         val textHeight = tag.nameBox?.height?.takeIf { it > 0f } ?: tag.price?.box?.height?.let { it * 0.5f }
         val focused = tag.nameRegion?.let { region ->
             withTimeoutOrNull(8_000) { runCatching { graph.platform.camera.readRegion(tag.frameId, region, tesseract, textHeight) }.getOrNull() }
         }?.let { PriceTagParser.pickName(it, language) }
         // The fuller reading in the label's script wins.
-        listOfNotNull(fromTag, focused).filter { NameText.isInScript(it, language) }
+        listOfNotNull(fromTag, focused).filter { NameText.isScriptName(it, language) }
             .maxByOrNull { NameText.scriptLetters(it, language) }
             ?.let { return it }
         // Only Latin text read on the tag: a brand such as "Pringles" if the fast recognizer, which
@@ -690,8 +691,12 @@ class HomeController(private val graph: AppGraph) {
         val lines = withTimeoutOrNull(20_000) {
             runCatching { graph.platform.camera.readLines(frame.id, whole, reader, textHeight = frame.height / 40f) }.getOrNull()
         } ?: return tag
+        // Only numbers in the labels' own digits count here: plain digits are the fast recognizer's
+        // to read, so a plain number only Tesseract saw is more likely a misread letter (a stylised
+        // Thai sign read as "4").
+        val ownDigits = lines.filter { line -> line.text.none { it in '0'..'9' } || line.text.any { it.isDigit() && it.code >= 0x80 } }
         return withContext(Dispatchers.Default) {
-            PriceTagParser.parse(OcrFrame(lines, frame.width, frame.height, frame.barcodes, frame.id), settings.localCurrency, storePhrases = storePhrases.known)
+            PriceTagParser.parse(OcrFrame(ownDigits, frame.width, frame.height, frame.barcodes, frame.id), settings.localCurrency, storePhrases = storePhrases.known)
         }
     }
 

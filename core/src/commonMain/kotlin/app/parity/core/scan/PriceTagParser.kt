@@ -165,7 +165,9 @@ object PriceTagParser {
         val kept = raw?.lines()?.filterNot { line ->
             val text = Lexicon.canonicalized(line)
             MultiBuyDetector.mentionsDeal(" " + text.lowercase() + " ") ||
-                PromoDetector.detect(listOf(OcrLine(text, Box(0f, 0f, 0f, 0f)))).isPromo
+                PromoDetector.detect(listOf(OcrLine(text, Box(0f, 0f, 0f, 0f)))).isPromo ||
+                // Slogans, and "price", units or a currency alone ("ราคา" misread as "ฐาคา"), as on the whole tag.
+                Advertising.isAdvertising(line) || Advertising.isUnitsOnly(line)
         }
         return NameText.pickLines(kept?.joinToString("\n"), language)
     }

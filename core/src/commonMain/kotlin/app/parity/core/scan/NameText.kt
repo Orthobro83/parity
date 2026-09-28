@@ -66,6 +66,37 @@ object NameText {
     }
 
     /**
+     * The longest unbroken run of [inScript] characters in [text], vowel signs included, weighted
+     * like [letterWeight]: a word's worth ("ราคา", "რძე") rather than stray letters in OCR junk
+     * ("A @s @a Ma ลห QR 0ป").
+     */
+    fun scriptRun(text: String, inScript: (Char) -> Boolean): Int {
+        var best = 0
+        var run = 0
+        for (c in text) {
+            run = if (inScript(c)) run + (if (han(c) || kana(c) || hangul(c)) 2 else 1) else 0
+            if (run > best) best = run
+        }
+        return best
+    }
+
+    /** True when [text] has a word of three or more letters' worth in [language]'s own script. */
+    fun isScriptName(text: String?, language: String?): Boolean {
+        val inScript = scriptOf(language) ?: return false
+        return scriptRun(text ?: return false, inScript) >= 3
+    }
+
+    /**
+     * True when [text] has a word: three letters' worth or more ([letterWeight]), with nothing
+     * inside it but letters, vowel signs and an apostrophe, hyphen or dot ("Coca-Cola", "St.").
+     * OCR junk ("A @s @a Ma QR 0ป", "B8") has none.
+     */
+    fun hasWord(text: String): Boolean = text.split(Regex("\\s+")).any { raw ->
+        val word = raw.trim { !it.isLetter() }
+        letterWeight(word) >= 3 && word.all { it.isLetter() || it.category.let { c -> c == CharCategory.NON_SPACING_MARK || c == CharCategory.COMBINING_SPACING_MARK } || it in "'’-." }
+    }
+
+    /**
      * How much text [text] holds, in letters: a Chinese, Japanese or Korean character carries about
      * as much as two Latin letters ("牛奶" is milk).
      */
@@ -85,7 +116,8 @@ object NameText {
         val inScript = scriptOf(language)
         val chosen = if (inScript != null) {
             val scored = lines.map { line -> line to line.count(inScript) }
-            val bestIndex = scored.indices.filter { scored[it].second >= 2 }.maxByOrNull { scored[it].second }
+            // The name has a word in the script, not just stray letters of it among junk.
+            val bestIndex = scored.indices.filter { scriptRun(scored[it].first, inScript) >= 3 }.maxByOrNull { scored[it].second }
             if (bestIndex != null) {
                 // A name wrapped onto a neighbouring line in the same script belongs to it; a line of
                 // mostly other letters is OCR junk ("RRAA რრლ").
@@ -125,11 +157,10 @@ object NameText {
         return x.length >= 3 && y.length >= 3 && Names.similarity(x, y) >= 0.85
     }
 
-    /** At least 3 letters' worth, mostly letters, and one word of 3+ ([letterWeight]). */
+    /** At least 3 letters' worth, mostly letters, and a real word ([hasWord]). */
     private fun looksLikeWords(line: String): Boolean {
         val letters = letterWeight(line)
         val nonSpace = line.count { !it.isWhitespace() }
-        val longestWord = line.split(' ').maxOfOrNull(::letterWeight) ?: 0
-        return letters >= 3 && letters * 2 >= nonSpace && longestWord >= 3
+        return letters >= 3 && letters * 2 >= nonSpace && hasWord(line)
     }
 }

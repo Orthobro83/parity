@@ -12,6 +12,7 @@ internal object Advertising {
         'í' to 'i', 'ì' to 'i', 'î' to 'i', 'ï' to 'i', 'ó' to 'o', 'ò' to 'o', 'ô' to 'o', 'ö' to 'o', 'õ' to 'o', 'ø' to 'o',
         'ú' to 'u', 'ù' to 'u', 'û' to 'u', 'ü' to 'u', 'ñ' to 'n', 'ç' to 'c', 'ß' to 's', 'ł' to 'l', 'ż' to 'z', 'ź' to 'z',
         'ś' to 's', 'ć' to 'c', 'ń' to 'n', 'ę' to 'e', 'ą' to 'a', 'ğ' to 'g', 'ş' to 's', 'ı' to 'i', 'ё' to 'е',
+        'ș' to 's', 'ț' to 't',
     )
 
     /** Lower case without accents, so "Promoción", "promocion" and "PROMOCIÓN" match. */
@@ -78,7 +79,7 @@ internal object Advertising {
         val canonical = Lexicon.canonicalized(Digits.normalize(text))
         val lower = canonical.lowercase()
         val offers = if (MultiBuyDetector.isDealWording(" $lower ") || PromoDetector.hasDiscount(canonical)) 1 else 0
-        val words = lower.split(Regex("[^\\p{L}]+")).map(::plain).filter { it.length >= 2 && it !in filler }
+        val words = lower.split(WORD_BREAK).map(::plain).filter { it.length >= 2 && it !in filler }
         if (words.isEmpty() && offers == 0) return 0.0
         val selling = words.count { it in marketing || it in Lexicon.promoWords || it in Lexicon.boilerplate }
         return (selling + offers).toDouble() / (words.size + offers)
@@ -89,9 +90,12 @@ internal object Advertising {
     /** Mostly marketing and no quantity: a banner or a slogan, not a product's name. */
     fun isAdvertising(text: String): Boolean = share(text) > 0.5 && !hasQuantity(text)
 
-    /** Nothing but units, weights and prices ("წონა 1 კგ", "each", "per kg"): not a name. */
+    /** Nothing but units, weights, prices and currencies ("წონა 1 კგ", "each", "per kg", "ราคา", "บาท"): not a name. */
     fun isUnitsOnly(text: String): Boolean {
-        val words = Lexicon.canonicalized(text).lowercase().split(Regex("[^\\p{L}]+")).map(::plain).filter { it.isNotEmpty() && it !in filler }
-        return words.isNotEmpty() && words.all { it in units || it in Lexicon.boilerplate }
+        val words = Lexicon.canonicalized(text).lowercase().split(WORD_BREAK).map(::plain).filter { it.isNotEmpty() && it !in filler }
+        return words.isNotEmpty() && words.all { it in units || it in Lexicon.boilerplate || Lexicon.isCurrencyWord(it) }
     }
+
+    /** Between words: anything but letters and the vowel signs that belong to them (Thai, Hindi, Tamil…). */
+    private val WORD_BREAK = Regex("[^\\p{L}\\p{M}]+")
 }

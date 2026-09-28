@@ -24,7 +24,7 @@ object PromoDetector {
         for ((index, line) in lines.withIndex()) {
             if (index in skipLines) continue
             val lower = line.text.lowercase()
-            val words = lower.split(Regex("[^\\p{L}\\p{N}+]+")).filter { it.isNotEmpty() }
+            val words = lower.split(Regex("[^\\p{L}\\p{M}\\p{N}+]+")).filter { it.isNotEmpty() }
             words.filter { it in Lexicon.promoWords }.forEach { signals += it }
             if ("was" in words || "now" in words) signals += if ("was" in words) "was" else "now"
             Lexicon.promoPhrases.filter { lower.contains(it) }.forEach { signals += it.trim() }
