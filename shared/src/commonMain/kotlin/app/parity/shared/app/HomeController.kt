@@ -19,6 +19,7 @@ import app.parity.core.scan.ParsedTag
 import app.parity.core.scan.PriceCandidate
 import app.parity.core.scan.PriceStabilizer
 import app.parity.core.scan.PriceTagParser
+import app.parity.core.scan.TagQuad
 import app.parity.core.scan.TextScript
 import app.parity.core.transfer.QrTransfer
 import app.parity.shared.data.CartItem
@@ -92,6 +93,9 @@ data class ScanCard(
     val basePrice: BigDecimal? get() = rate?.localToBase(localPrice)
 }
 
+/** The tag the live camera is reading, as outlined in the frame's pixels (design §6.1). */
+data class Aim(val quad: TagQuad, val frameWidth: Int, val frameHeight: Int)
+
 data class CartSummary(
     val count: Int,
     val totalBase: BigDecimal,
@@ -121,6 +125,10 @@ class HomeController(private val graph: AppGraph) {
     private val _capturing = MutableStateFlow(false)
     /** True while the shutter's photo is being taken and read. */
     val capturing: StateFlow<Boolean> = _capturing
+
+    private val _aim = MutableStateFlow<Aim?>(null)
+    /** The outline of the tag the live camera is reading, or null when it isn't on one. */
+    val aim: StateFlow<Aim?> = _aim
 
     /** True while a sheet or dialog is open, so the camera doesn't replace the card underneath. */
     val paused = MutableStateFlow(false)
@@ -184,12 +192,15 @@ class HomeController(private val graph: AppGraph) {
     }
 
     private suspend fun process(frame: OcrFrame) {
-        if (paused.value) return
         // A card the shopper asked for (photo, shutter, typed) stays until they're done with it.
-        if (_card.value?.pinned == true) return
+        if (paused.value || _card.value?.pinned == true) {
+            _aim.value = null
+            return
+        }
         val settings = graph.settings.value ?: return
         // Strict: only numbers written like shelf prices, so random text in view makes no card.
         val tag = PriceTagParser.parse(frame, settings.localCurrency, strict = true)
+        _aim.value = tag.tagQuad?.let { Aim(it, frame.width, frame.height) }
         if (tag.price == null) {
             // Nothing price-like for a while: forget the last tag so re-scanning it shows the card again.
             if (++emptyFrames >= 8) stabilizer.reset()
@@ -333,9 +344,12 @@ class HomeController(private val graph: AppGraph) {
         val price = tag.price ?: return null
         val p = price.box
         val area = PriceTagParser.scriptArea(tag) ?: return null
-        // A tag's smaller text is about half the height of its price digits.
+        // A tag's smaller text is about half the height of its price digits. With its outline found,
+        // the tag is read straightened, bands and all, rather than an area grown from the price.
         val lines = withTimeoutOrNull(12_000) {
-            runCatching { graph.platform.camera.readLines(tag.frameId, area, tesseract, textHeight = p.height * 0.5f) }.getOrNull()
+            runCatching {
+                graph.platform.camera.readLines(tag.frameId, area, tesseract, textHeight = p.height * 0.5f, quad = tag.tagQuad?.reach())
+            }.getOrNull()
         } ?: return null
         return withContext(Dispatchers.Default) { PriceTagParser.refine(tag, lines, settings.localCurrency, settings.labelLanguage) }
     }

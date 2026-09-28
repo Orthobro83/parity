@@ -40,6 +40,7 @@ import app.parity.core.scan.Box
 import app.parity.core.scan.OcrElement
 import app.parity.core.scan.OcrFrame
 import app.parity.core.scan.OcrLine
+import app.parity.core.scan.TagQuad
 import app.parity.shared.platform.CameraScanner
 import app.parity.shared.platform.ScanMode
 import com.google.android.gms.tasks.Tasks
@@ -243,6 +244,8 @@ class CameraScannerImpl(
             synchronized(frames) { frames[frameId] = bitmap to rotation }
             val textTask = textRecognizer.process(input)
             val barcodeTask = tagBarcodes.process(input)
+            // While ML Kit reads, find the tags' outlines (design §6.1).
+            val quads = runCatching { TagOutlines.find(bitmap, rotation) }.getOrDefault(emptyList())
             val text = runCatching { Tasks.await(textTask) }.getOrNull()
             val barcodes = runCatching { Tasks.await(barcodeTask) }.getOrNull().orEmpty()
             barcodes.filter { it.format == Barcode.FORMAT_QR_CODE }.mapNotNull { it.rawValue }.forEach { onQrCode.value(it) }
@@ -263,9 +266,9 @@ class CameraScannerImpl(
             }
             if (now - lastLogged > 2_000 && Log.isLoggable("ParityOcr", Log.VERBOSE)) {
                 lastLogged = now
-                Log.v("ParityOcr", "live ${width}x$height ($script): ${lines.joinToString(" | ") { it.text }}")
+                Log.v("ParityOcr", "live ${width}x$height ($script): ${lines.joinToString(" | ") { it.text }} · tags ${quads.map { it.bounds }}")
             }
-            onFrame.value(OcrFrame(lines, width, height, productCodes, frameId))
+            onFrame.value(OcrFrame(lines, width, height, productCodes, frameId, quads))
         }
     }
 
@@ -310,13 +313,18 @@ class CameraScannerImpl(
         future.addListener({ runCatching { future.get() }.onSuccess(cont::resume).onFailure(cont::resumeWithException) }, ContextCompat.getMainExecutor(context))
     }
 
-    /** The upright crop of [region] from frame [frameId], and its offset in the frame. */
-    private fun crop(frameId: Long, region: Box): Triple<Bitmap, Int, Int>? {
+    /** Frame or photo [frameId], upright. */
+    private fun uprightImage(frameId: Long): Bitmap? {
         val photo = synchronized(photos) { photos[frameId] }
         val (frame, rotation) = photo?.let { it to 0 } ?: synchronized(frames) { frames[frameId] } ?: return null
-        val upright = if (rotation == 0) frame else {
+        return if (rotation == 0) frame else {
             Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
         }
+    }
+
+    /** The upright crop of [region] from frame [frameId], and its offset in the frame. */
+    private fun crop(frameId: Long, region: Box): Triple<Bitmap, Int, Int>? {
+        val upright = uprightImage(frameId) ?: return null
         val left = region.left.toInt().coerceIn(0, upright.width - 1)
         val top = region.top.toInt().coerceIn(0, upright.height - 1)
         val right = region.right.toInt().coerceIn(left + 1, upright.width)
@@ -330,7 +338,17 @@ class CameraScannerImpl(
         return tesseract.read(bitmap, languages, textHeight)
     }
 
-    override suspend fun readLines(frameId: Long, region: Box, languages: String, textHeight: Float?): List<OcrLine>? {
+    override suspend fun readLines(frameId: Long, region: Box, languages: String, textHeight: Float?, quad: TagQuad?): List<OcrLine>? {
+        // The tag alone and straightened, its lines placed back where they are in the frame.
+        if (quad != null) {
+            val image = uprightImage(frameId) ?: return null
+            val tag = withContext(Dispatchers.Default) { TagOutlines.straighten(image, quad, TESSERACT_SIDE) }
+            if (tag != null) {
+                return tesseract.readLines(tag.bitmap, languages, textHeight?.let { it * tag.scale })?.map { (text, r) ->
+                    OcrLine(text, tag.toImage(r.toBox()))
+                }.also { tag.bitmap.recycle() }
+            }
+        }
         val (bitmap, dx, dy) = crop(frameId, region) ?: return null
         return tesseract.readLines(bitmap, languages, textHeight)?.map { (text, r) ->
             OcrLine(text, Box((r.left + dx).toFloat(), (r.top + dy).toFloat(), (r.right + dx).toFloat(), (r.bottom + dy).toFloat()))
@@ -401,7 +419,9 @@ class CameraScannerImpl(
         val frameId = nextFrameId.getAndIncrement()
         synchronized(photos) { photos[frameId] = bitmap }
         val input = InputImage.fromBitmap(bitmap, 0)
-        val text = runCatching { textRecognizer.process(input).awaitResult() }.getOrNull()
+        val textTask = textRecognizer.process(input)
+        val quads = runCatching { TagOutlines.find(bitmap) }.getOrDefault(emptyList())
+        val text = runCatching { textTask.awaitResult() }.getOrNull()
         val barcodes = runCatching { tagBarcodes.process(input).awaitResult() }.getOrNull().orEmpty()
         val lines = text?.textBlocks.orEmpty().flatMap { block ->
             block.lines.mapNotNull { line ->
@@ -410,7 +430,7 @@ class CameraScannerImpl(
             }
         }
         if (Log.isLoggable("ParityOcr", Log.VERBOSE)) {
-            Log.v("ParityOcr", "photo ${bitmap.width}x${bitmap.height}: ${lines.joinToString(" | ") { "${it.text} @${it.box}" }}")
+            Log.v("ParityOcr", "photo ${bitmap.width}x${bitmap.height}: ${lines.joinToString(" | ") { "${it.text} @${it.box}" }} · tags ${quads.map { it.bounds }}")
             runCatching { File(context.cacheDir, "photo_last.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         }
         return OcrFrame(
@@ -419,6 +439,7 @@ class CameraScannerImpl(
             height = bitmap.height,
             barcodes = barcodes.filter { it.format != Barcode.FORMAT_QR_CODE }.mapNotNull { it.rawValue },
             id = frameId,
+            tagQuads = quads,
         )
     }
 
@@ -438,4 +459,9 @@ class CameraScannerImpl(
     }
 
     private fun Rect.toBox() = Box(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+
+    private companion object {
+        /** Longest side of a straightened tag handed to Tesseract. */
+        const val TESSERACT_SIDE = 2400
+    }
 }

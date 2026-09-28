@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -13,6 +15,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,11 +58,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import app.parity.core.money.Currencies
 import app.parity.core.money.CurrencyCode
@@ -67,6 +77,7 @@ import app.parity.core.money.Languages
 import app.parity.core.money.MoneyFormat
 import app.parity.core.scan.LabelReading
 import app.parity.shared.app.AppGraph
+import app.parity.shared.app.Aim
 import app.parity.shared.app.CartSummary
 import app.parity.shared.app.NameStatus
 import app.parity.shared.app.ScanCard
@@ -130,6 +141,10 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
                 onFrame = home::onFrame,
                 onQrCode = home::onQrCode,
             )
+            if (!overlay && card?.pinned != true) {
+                val aim by home.aim.collectAsState()
+                AimOutline(aim, Modifier.fillMaxSize())
+            }
         } else if (!cameraGranted) {
             CameraPermissionPrompt(
                 onAllow = { graph.platform.permissions.requestCamera() },
@@ -249,6 +264,59 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
         EditNameDialog(c.name ?: c.originalName ?: "", onSave = { home.rename(it); editingName = null }, onDismiss = { editingName = null })
     }
     fxDetail?.let { c -> FxDetailDialog(c, onDismiss = { fxDetail = null }) }
+}
+
+/**
+ * Where the camera reads (design §4.2, §6.1): a soft outline on the tag it's on, or faint corner
+ * marks of a tag-shaped frame at the centre while it's on none, to aim with.
+ */
+@Composable
+private fun AimOutline(aim: Aim?, modifier: Modifier) {
+    val accent = Parity.colors.accent
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val target = aim?.let { onScreen(it, size) }
+    // Where the outline was last, so it fades out in place. It appears on the tag, then glides
+    // from one reading to the next rather than jump.
+    val last = remember { arrayOfNulls<Offset>(4) }
+    val appearing = target != null && last[0] == null
+    target?.forEachIndexed { i, corner -> last[i] = corner }
+    val shown by animateFloatAsState(if (target != null) 1f else 0f, tween(180), finishedListener = { if (it == 0f) last.fill(null) })
+    val corners = List(4) { i -> animateOffsetAsState(last[i] ?: Offset.Zero, if (appearing) snap() else tween(140)).value }
+    Canvas(modifier.onSizeChanged { size = it }) {
+        val stroke = 2.dp.toPx()
+        if (shown < 1f) {
+            val w = this.size.width * 0.64f
+            val h = w / 1.6f
+            val left = (this.size.width - w) / 2
+            val top = (this.size.height - h) / 2
+            val arm = 22.dp.toPx()
+            val color = Color.White.copy(alpha = 0.42f * (1f - shown))
+            for ((x, y, sx, sy) in listOf(
+                listOf(left, top, 1f, 1f), listOf(left + w, top, -1f, 1f), listOf(left + w, top + h, -1f, -1f), listOf(left, top + h, 1f, -1f),
+            )) {
+                drawLine(color, Offset(x, y), Offset(x + arm * sx, y), stroke, StrokeCap.Round)
+                drawLine(color, Offset(x, y), Offset(x, y + arm * sy), stroke, StrokeCap.Round)
+            }
+        }
+        if (shown > 0f) {
+            val outline = Path().apply {
+                moveTo(corners[0].x, corners[0].y)
+                corners.drop(1).forEach { lineTo(it.x, it.y) }
+                close()
+            }
+            drawPath(outline, accent.copy(alpha = 0.08f * shown))
+            drawPath(outline, accent.copy(alpha = 0.85f * shown), style = Stroke(stroke, join = StrokeJoin.Round))
+        }
+    }
+}
+
+/** [aim]'s corners on a preview of [view] size that fills the view with the frame (centre crop). */
+private fun onScreen(aim: Aim, view: IntSize): List<Offset>? {
+    if (view.width == 0 || aim.frameWidth <= 0 || aim.frameHeight <= 0) return null
+    val scale = maxOf(view.width / aim.frameWidth.toFloat(), view.height / aim.frameHeight.toFloat())
+    val dx = (view.width - aim.frameWidth * scale) / 2
+    val dy = (view.height - aim.frameHeight * scale) / 2
+    return aim.quad.corners.map { (x, y) -> Offset(dx + x * scale, dy + y * scale) }
 }
 
 /** The shutter: a photo of the tag when live scanning doesn't pick it up (design §6). */

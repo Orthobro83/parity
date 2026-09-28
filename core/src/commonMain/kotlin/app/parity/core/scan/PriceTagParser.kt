@@ -40,6 +40,8 @@ data class ParsedTag(
     val candidates: List<PriceCandidate> = emptyList(),
     /** The fast recognizer's lines: gibberish for scripts it can't read, but in the right places. */
     val lines: List<OcrLine> = emptyList(),
+    /** Outline of the tag the price was read on, when one was found (design §6.1). */
+    val tagQuad: TagQuad? = null,
 ) {
     /** Currency printed on the tag, or null when the tag shows no currency (assume local). */
     val printedCurrency: CurrencyCode? get() = price?.currency
@@ -62,11 +64,16 @@ object PriceTagParser {
      * strict ([looksLikeShelfPrice]).
      */
     fun parse(ocr: OcrFrame, local: CurrencyCode?, strict: Boolean = false): ParsedTag {
-        val frame = ocr.withAsciiDigits()
+        val whole = ocr.withAsciiDigits()
         val localDecimals = local?.let { Currencies[it].decimals } ?: 2
-        val candidates = mutableListOf<PriceCandidate>()
-        frame.lines.forEach { line -> candidates += candidatesInLine(line, local, localDecimals) }
-        mergeSuperscriptCents(frame, local, candidates)
+        val everywhere = candidatesIn(whole, local, localDecimals)
+        val aimed = aimedTag(whole, everywhere, localDecimals)
+        val quad = aimed?.first
+        // Only the aimed tag's own text, so a neighbouring tag's price, name and banners stay out.
+        // An outline holding nothing but the price is a panel on the tag: words are looked for around it.
+        val frame = if (quad != null && aimed.second) whole.copy(lines = whole.lines.mapNotNull { it.within(quad.reach()) }) else whole
+        val candidates = (if (frame === whole) everywhere else candidatesIn(frame, local, localDecimals))
+            .filter { quad == null || quad.holds(it.box) }
 
         val barcode = frame.barcodes.firstOrNull()
         if (candidates.isEmpty()) {
@@ -81,18 +88,61 @@ object PriceTagParser {
         return decided.copy(
             name = name?.first,
             nameBox = name?.second,
-            nameRegion = decided.price?.let { nameRegion(it, name?.second, frame) },
+            nameRegion = decided.price?.let { nameRegion(it, name?.second, frame, quad) },
             barcode = barcode,
             frameId = frame.id,
             lines = frame.lines,
+            tagQuad = quad,
         )
     }
 
+    private fun candidatesIn(frame: OcrFrame, local: CurrencyCode?, localDecimals: Int): MutableList<PriceCandidate> {
+        val candidates = mutableListOf<PriceCandidate>()
+        frame.lines.forEach { line -> candidates += candidatesInLine(line, local, localDecimals) }
+        mergeSuperscriptCents(frame, local, candidates)
+        return candidates
+    }
+
     /**
-     * The area around [tag]'s price to read with a script-aware engine: a few lines above and below,
-     * widened to take in whole lines of text there, as names often start well left of the price.
+     * The outline of the tag aimed at (design §6.1), and whether it holds a name besides the price.
+     * It's the finder's best outline that holds a price. The smallest one inside it holding that
+     * price and a name, above the price where names are if one does, is the tag itself, the first
+     * being the rail or photo around it; and an outline with nothing but the price is a panel on a
+     * tag, which gives way to the tag around it. Null when no outline holds a price, as when none
+     * was found: then the whole view is read.
+     */
+    private fun aimedTag(frame: OcrFrame, candidates: List<PriceCandidate>, localDecimals: Int): Pair<TagQuad, Boolean>? {
+        val prices = candidates.filter { looksLikePrice(it, localDecimals) }
+        fun held(q: TagQuad) = prices.filter { q.holds(it.box) }
+        fun hasName(q: TagQuad, aboveOnly: Boolean): Boolean {
+            val onIt = held(q)
+            val top = onIt.minOfOrNull { it.box.top } ?: return false
+            return frame.lines.mapNotNull { it.within(q.reach()) }.any { line ->
+                q.holds(line.box) && NameFinder.isNameLike(line, null) && onIt.none { sameRow(it.box, line.box) } &&
+                    (!aboveOnly || line.box.centerY < top)
+            }
+        }
+        fun inside(inner: TagQuad, outer: TagQuad) = inner.area < outer.area * 0.8f && outer.contains(inner.bounds.centerX, inner.bounds.centerY)
+        val first = frame.tagQuads.firstOrNull { held(it).isNotEmpty() } ?: return null
+        val price = held(first)
+        fun sameTag(q: TagQuad, aboveOnly: Boolean) = held(q).any { it in price } && hasName(q, aboveOnly)
+        if (hasName(first, aboveOnly = false)) {
+            val inner = frame.tagQuads.filter { inside(it, first) }
+            val tag = inner.filter { sameTag(it, aboveOnly = true) }.minByOrNull { it.area }
+                ?: inner.filter { sameTag(it, aboveOnly = false) }.minByOrNull { it.area }
+            return (tag ?: first) to true
+        }
+        val around = frame.tagQuads.filter { inside(first, it) && sameTag(it, aboveOnly = false) }.minByOrNull { it.area }
+        return if (around != null) around to true else first to false
+    }
+
+    /**
+     * The area around [tag]'s price to read with a script-aware engine: its tag with the bands
+     * around it when the outline was found; otherwise a few lines above and below the price, widened
+     * to take in whole lines of text there, as names often start well left of the price.
      */
     fun scriptArea(tag: ParsedTag): Box? {
+        tag.tagQuad?.let { return it.reach().bounds }
         val p = tag.price?.box ?: return null
         if (p.width <= 0f || p.height <= 0f) return null // typed in: no image
         val base = Box(p.left - p.width * 1.2f, p.top - p.height * 2.5f, p.right + p.width * 1.2f, p.bottom + p.height * 3.2f)
@@ -424,6 +474,14 @@ object PriceTagParser {
             line.box.left + w * run.start / len, line.box.top,
             line.box.left + w * run.end / len, line.box.bottom,
         )
+    }
+
+    private fun nameRegion(price: PriceCandidate, nameBox: Box?, frame: OcrFrame, quad: TagQuad?): Box {
+        val region = nameRegion(price, nameBox, frame)
+        // Not past the tag, into the shelf above.
+        val tag = quad?.reach()?.bounds ?: return region
+        return Box(maxOf(region.left, tag.left), maxOf(region.top, tag.top), minOf(region.right, tag.right), minOf(region.bottom, tag.bottom))
+            .takeIf { it.width > 0f && it.height > 0f } ?: region
     }
 
     private fun nameRegion(price: PriceCandidate, nameBox: Box?, frame: OcrFrame): Box {

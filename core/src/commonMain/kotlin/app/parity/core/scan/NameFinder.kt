@@ -63,7 +63,7 @@ internal object NameFinder {
         return Lexicon.perUnitMarkers.any { lower.contains(it) } && decimalNumber.containsMatchIn(text)
     }
 
-    private fun isNameLike(line: OcrLine, price: PriceCandidate?): Boolean {
+    fun isNameLike(line: OcrLine, price: PriceCandidate?): Boolean {
         val text = line.text.trim()
         val letters = NameText.letterWeight(text)
         if (letters < 3) return false

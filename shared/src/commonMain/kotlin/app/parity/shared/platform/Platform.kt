@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import app.parity.core.scan.Box
 import app.parity.core.scan.OcrFrame
 import app.parity.core.scan.OcrLine
+import app.parity.core.scan.TagQuad
 import app.parity.core.scan.TextScript
 import kotlinx.coroutines.flow.StateFlow
 
@@ -61,8 +62,9 @@ interface CameraScanner {
     /**
      * Reads the text lines, with their boxes in frame coordinates, in [region] of frame [frameId]
      * using the script-specific engine. Used for a second pass over tags in scripts like Georgian.
+     * With [quad], that tag is read instead, straightened (design §6.1).
      */
-    suspend fun readLines(frameId: Long, region: Box, languages: String, textHeight: Float? = null): List<OcrLine>?
+    suspend fun readLines(frameId: Long, region: Box, languages: String, textHeight: Float? = null, quad: TagQuad? = null): List<OcrLine>?
 
     /** Reads a photo (JPEG/PNG bytes) like a camera frame; it then backs [readRegion]. */
     suspend fun scanImage(bytes: ByteArray): OcrFrame?
