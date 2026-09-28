@@ -24,24 +24,50 @@ object TagFinder {
     private const val MIN_ASPECT = 0.4f
     private const val MAX_ASPECT = 2.5f
 
+    private const val SLOT_GRAY = 0
+    private const val SLOT_MAG = 1
+    private const val SLOT_STACK = 2
+    private const val SLOT_LABELS = 3
+    private const val SLOT_STAMP = 4
+    private const val SLOT_EDGE = 0
+    private const val SLOT_WIDE = 1
+    private const val SLOT_THICK = 2
+    private const val SLOT_ENCLOSED = 3
+
+    /**
+     * Working memory for [find], kept between calls on one thread (the camera's analysis thread) so
+     * live frames don't churn through a few megabytes each.
+     */
+    class Scratch {
+        private val ints = arrayOfNulls<IntArray>(6)
+        private val flags = arrayOfNulls<BooleanArray>(4)
+
+        internal fun ints(slot: Int, size: Int): IntArray =
+            ints[slot]?.takeIf { it.size >= size } ?: IntArray(size).also { ints[slot] = it }
+
+        internal fun flags(slot: Int, size: Int): BooleanArray =
+            flags[slot]?.takeIf { it.size >= size } ?: BooleanArray(size).also { flags[slot] = it }
+    }
+
     /**
      * Tag outlines in [luma] (one byte per pixel, row by row), best first: containing the centre,
      * where the shopper aims, then near it, large and rectangular.
      */
-    fun find(luma: ByteArray, width: Int, height: Int, max: Int = 6): List<TagQuad> {
+    fun find(luma: ByteArray, width: Int, height: Int, max: Int = 6, scratch: Scratch = Scratch()): List<TagQuad> {
         if (width < 24 || height < 24 || luma.size < width * height) return emptyList()
         val size = width * height
-        val edges = edgeMap(blurred(luma, width, height), width, height)
-        val labels = IntArray(size)
-        val regions = components(edges, labels, width, height)
+        val stack = scratch.ints(SLOT_STACK, size)
+        val edges = edgeMap(blurred(luma, width, height, scratch), width, height, scratch, stack)
+        val labels = scratch.ints(SLOT_LABELS, size).also { it.fill(0, 0, size) }
+        val regions = components(edges, labels, width, height, stack)
         // Inside some closed outline: paper, print and the edges between them.
-        val enclosed = BooleanArray(size) { edges[it] || !regions[labels[it] - 1].touchesBorder }
+        val enclosed = scratch.flags(SLOT_ENCLOSED, size)
+        for (i in 0 until size) enclosed[i] = edges[i] || !regions[labels[i] - 1].touchesBorder
         val pieces = regions.filter { !it.touchesBorder && it.area >= size * MIN_AREA / 8 }
         val gap = maxOf(6, maxOf(width, height) / 48)
         val seeds = pieces.map { listOf(it) } + bands(pieces, gap)
 
-        val stamp = IntArray(size)
-        val stack = IntArray(size)
+        val stamp = scratch.ints(SLOT_STAMP, size).also { it.fill(0, 0, size) }
         val quads = seeds.mapIndexedNotNull { i, group ->
             shape(group, enclosed, stamp, i + 1, stack, width, height)?.let { quadOf(it, width, height) }
         }.sortedByDescending { it.score }
@@ -56,9 +82,10 @@ object TagFinder {
     }
 
     /** Two passes of a [1 2 1] blur each way: smooths sensor noise and a screen's moiré. */
-    private fun blurred(luma: ByteArray, w: Int, h: Int): IntArray {
-        val a = IntArray(w * h) { luma[it].toInt() and 0xFF }
-        val b = IntArray(w * h)
+    private fun blurred(luma: ByteArray, w: Int, h: Int, scratch: Scratch): IntArray {
+        val a = scratch.ints(SLOT_GRAY, w * h)
+        for (i in 0 until w * h) a[i] = luma[i].toInt() and 0xFF
+        val b = scratch.ints(SLOT_MAG, w * h)
         repeat(2) {
             for (y in 0 until h) {
                 val row = y * w
@@ -81,8 +108,9 @@ object TagFinder {
      * The threshold follows the image within bounds: a white tag on a pale rail makes a faint edge
      * next to its print's strong ones, and a dim, noisy frame needs a higher one.
      */
-    private fun edgeMap(gray: IntArray, w: Int, h: Int): BooleanArray {
-        val mag = IntArray(w * h)
+    private fun edgeMap(gray: IntArray, w: Int, h: Int, scratch: Scratch, stack: IntArray): BooleanArray {
+        // The blur's other buffer: free once it's done.
+        val mag = scratch.ints(SLOT_MAG, w * h).also { it.fill(0, 0, w * h) }
         val histogram = IntArray(2048)
         for (y in 1 until h - 1) {
             val up = (y - 1) * w
@@ -105,9 +133,8 @@ object TagFinder {
         val low = high / 2
 
         // Hysteresis: strong edges, plus weaker ones connected to them.
-        val edge = BooleanArray(w * h)
-        val stack = IntArray(w * h)
-        for (i in mag.indices) {
+        val edge = scratch.flags(SLOT_EDGE, w * h).also { it.fill(false, 0, w * h) }
+        for (i in 0 until w * h) {
             if (mag[i] < high || edge[i]) continue
             edge[i] = true
             var top = 0
@@ -126,12 +153,12 @@ object TagFinder {
             }
         }
         // Thicken by one pixel.
-        val wide = BooleanArray(w * h)
+        val wide = scratch.flags(SLOT_WIDE, w * h)
         for (y in 0 until h) {
             val row = y * w
             for (x in 0 until w) wide[row + x] = edge[row + x] || (x > 0 && edge[row + x - 1]) || (x < w - 1 && edge[row + x + 1])
         }
-        val thick = BooleanArray(w * h)
+        val thick = scratch.flags(SLOT_THICK, w * h)
         for (y in 0 until h) {
             val row = y * w
             for (x in 0 until w) thick[row + x] = wide[row + x] || (y > 0 && wide[row - w + x]) || (y < h - 1 && wide[row + w + x])
@@ -159,10 +186,9 @@ object TagFinder {
     }
 
     /** Regions of non-edge pixels, 4-connected so a diagonal gap in an outline doesn't leak. */
-    private fun components(edges: BooleanArray, labels: IntArray, w: Int, h: Int): List<Region> {
+    private fun components(edges: BooleanArray, labels: IntArray, w: Int, h: Int, stack: IntArray): List<Region> {
         val regions = mutableListOf<Region>()
-        val stack = IntArray(w * h)
-        for (start in edges.indices) {
+        for (start in 0 until w * h) {
             if (edges[start] || labels[start] != 0) continue
             val region = Region(regions.size + 1, start)
             regions += region

@@ -40,6 +40,7 @@ import app.parity.core.scan.Box
 import app.parity.core.scan.OcrElement
 import app.parity.core.scan.OcrFrame
 import app.parity.core.scan.OcrLine
+import app.parity.core.scan.TagFinder
 import app.parity.core.scan.TagQuad
 import app.parity.shared.platform.CameraScanner
 import app.parity.shared.platform.ScanMode
@@ -221,6 +222,7 @@ class CameraScannerImpl(
         private var lastRun = 0L
         private var lastLogged = 0L
         private var loggedSize = ""
+        private val tagScratch = TagFinder.Scratch()
 
         override fun analyze(image: ImageProxy) {
             val now = SystemClock.elapsedRealtime()
@@ -252,7 +254,7 @@ class CameraScannerImpl(
             val textTask = textRecognizer.process(input)
             val barcodeTask = tagBarcodes.process(input)
             // While ML Kit reads, find the tags' outlines (design §6.1).
-            val quads = runCatching { TagOutlines.find(bitmap, rotation) }.getOrDefault(emptyList())
+            val quads = runCatching { TagOutlines.find(bitmap, rotation, tagScratch) }.getOrDefault(emptyList())
             val text = runCatching { Tasks.await(textTask) }.getOrNull()
             val barcodes = runCatching { Tasks.await(barcodeTask) }.getOrNull().orEmpty()
             barcodes.filter { it.format == Barcode.FORMAT_QR_CODE }.mapNotNull { it.rawValue }.forEach { onQrCode.value(it) }

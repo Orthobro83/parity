@@ -18,8 +18,11 @@ internal object TagOutlines {
     /** Longest side of the copy searched: plenty for a tag's outline, and quick on a budget phone. */
     private const val SEARCH_SIDE = 480
 
-    /** Outlines in [bitmap] once turned upright by [rotation] degrees, in upright pixels, best first. */
-    fun find(bitmap: Bitmap, rotation: Int = 0): List<TagQuad> {
+    /**
+     * Outlines in [bitmap] once turned upright by [rotation] degrees, in upright pixels, best first.
+     * A caller on one thread passes the same [scratch] each time.
+     */
+    fun find(bitmap: Bitmap, rotation: Int = 0, scratch: TagFinder.Scratch = TagFinder.Scratch()): List<TagQuad> {
         val scale = minOf(1f, SEARCH_SIDE.toFloat() / maxOf(bitmap.width, bitmap.height))
         val small = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postScale(scale, scale); postRotate(rotation.toFloat()) }, true)
         val w = small.width
@@ -31,7 +34,7 @@ internal object TagOutlines {
             val p = px[i]
             ((((p shr 16) and 0xFF) * 77 + ((p shr 8) and 0xFF) * 150 + (p and 0xFF) * 29) shr 8).toByte()
         }
-        return TagFinder.find(luma, w, h).map { it.scaled(1 / scale) }
+        return TagFinder.find(luma, w, h, scratch = scratch).map { it.scaled(1 / scale) }
     }
 
     /**
