@@ -135,11 +135,18 @@ class ShoppingRepository(private val db: ParityDatabase) {
 
     fun observeProduct(id: String): Flow<ProductEntity?> = products.observe(id)
 
+    /**
+     * Stores a name's translation; [translatedLang] set with no [translated] text means there was
+     * nothing to translate. Purchases saved before the translation arrived get it too.
+     */
     suspend fun saveTranslation(productId: String, originalLang: String?, translated: String?, translatedLang: String?) {
         products.get(productId)?.let {
             products.upsert(it.copy(originalLang = originalLang, translatedName = translated, translatedLang = translatedLang))
         }
+        if (translated != null) sessions.fillTranslation(productId, translated)
     }
+
+    suspend fun untranslatedProducts(language: String): List<ProductEntity> = products.untranslated(language)
 
     suspend fun renameProduct(productId: String, name: String) {
         products.get(productId)?.let { products.upsert(it.copy(userEditedName = name.trim().ifEmpty { null })) }
@@ -187,6 +194,8 @@ class ShoppingRepository(private val db: ParityDatabase) {
     suspend fun updateObservation(id: String, transform: (PriceObservationEntity) -> PriceObservationEntity) {
         observations.get(id)?.let { observations.upsert(transform(it)) }
     }
+
+    suspend fun deleteObservation(id: String) = observations.delete(id)
 
     /** The previous sighting of this product in the same currencies, for the ▲/▼ indicator. */
     suspend fun previousSighting(observation: PriceObservationEntity): PreviousSighting? {

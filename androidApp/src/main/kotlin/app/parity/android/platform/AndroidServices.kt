@@ -8,6 +8,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.telephony.TelephonyManager
+import android.util.Log
 import app.parity.shared.platform.Haptics
 import app.parity.shared.platform.LocationFix
 import app.parity.shared.platform.LocationService
@@ -18,9 +19,11 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.languageid.LanguageIdentificationOptions
 import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
@@ -34,6 +37,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
 
+private const val TAG = "ParityText"
+
 /** On-device language identification and translation with ML Kit (design §6.2). */
 class MlKitTextServices : TextServices {
     private val languageId by lazy {
@@ -46,17 +51,41 @@ class MlKitTextServices : TextServices {
 
     override suspend fun translate(text: String, from: String, to: String): String? {
         val translator = translatorFor(from, to) ?: return null
-        return withTimeoutOrNull(60_000) {
-            runCatching {
-                translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).awaitResult()
-                translator.translate(text).awaitResult()
-            }.getOrNull()
+        // Only with packs already here: downloading one is the shopper's choice (Settings).
+        if (!isTranslationReady(from, to)) return null
+        return withTimeoutOrNull(20_000) {
+            runCatching { translator.translate(text).awaitResult() }
+                .onSuccess { Log.d(TAG, "offline $from>$to: $text → $it") }
+                .onFailure { Log.w(TAG, "translate $from>$to failed", it) }.getOrNull()
         }
     }
 
-    override suspend fun prepare(from: String, to: String) {
-        val translator = translatorFor(from, to) ?: return
-        runCatching { translator.downloadModelIfNeeded(DownloadConditions.Builder().requireWifi().build()).awaitResult() }
+    override suspend fun isTranslationReady(from: String, to: String): Boolean {
+        val languages = listOf(from, to).map { TranslateLanguage.fromLanguageTag(it) ?: return false }
+        val models = RemoteModelManager.getInstance()
+        return languages.all { language ->
+            runCatching { models.isModelDownloaded(TranslateRemoteModel.Builder(language).build()).awaitResult() }.getOrDefault(false)
+        }.also { Log.d(TAG, "language packs $from>$to ready: $it") }
+    }
+
+    override suspend fun prepare(from: String, to: String, wifiOnly: Boolean): Boolean {
+        val translator = translatorFor(from, to) ?: return false
+        val conditions = DownloadConditions.Builder().apply { if (wifiOnly) requireWifi() }.build()
+        return runCatching { translator.downloadModelIfNeeded(conditions).awaitResult() }
+            .onFailure { Log.w(TAG, "language pack $from>$to not downloaded", it) }
+            .isSuccess
+    }
+
+    override suspend fun offlineLanguages(): Set<String> = runCatching {
+        RemoteModelManager.getInstance().getDownloadedModels(TranslateRemoteModel::class.java).awaitResult()
+            .map { it.language }.toSet()
+    }.getOrDefault(emptySet())
+
+    override suspend fun deleteOffline(language: String): Boolean {
+        val code = TranslateLanguage.fromLanguageTag(language) ?: return false
+        return runCatching {
+            RemoteModelManager.getInstance().deleteDownloadedModel(TranslateRemoteModel.Builder(code).build()).awaitResult()
+        }.isSuccess
     }
 
     private fun translatorFor(from: String, to: String): Translator? {

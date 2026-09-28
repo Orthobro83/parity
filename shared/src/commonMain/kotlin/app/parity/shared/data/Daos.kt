@@ -62,6 +62,14 @@ interface ProductDao {
     @Query("SELECT * FROM product ORDER BY createdAt")
     suspend fun all(): List<ProductEntity>
 
+    /** Names not yet translated into [language], e.g. read while the language pack downloaded. */
+    @Query(
+        "SELECT * FROM product WHERE originalName IS NOT NULL AND userEditedName IS NULL AND " +
+            "(translatedLang IS NULL OR translatedLang != :language) AND " +
+            "(originalLang IS NULL OR originalLang != :language) ORDER BY createdAt DESC LIMIT 200",
+    )
+    suspend fun untranslated(language: String): List<ProductEntity>
+
     @Upsert
     suspend fun upsert(product: ProductEntity)
 
@@ -105,6 +113,9 @@ interface ObservationDao {
 
     @Query("DELETE FROM price_observation")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM price_observation WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -149,6 +160,13 @@ interface SessionDao {
 
     @Query("SELECT * FROM purchase_line")
     suspend fun allLines(): List<PurchaseLineEntity>
+
+    /** Fills in a translation that arrived after purchases of the product were saved without one. */
+    @Query(
+        "UPDATE purchase_line SET nameTranslatedAtPurchase = :translated WHERE productId = :productId AND " +
+            "(nameTranslatedAtPurchase IS NULL OR nameTranslatedAtPurchase = nameAtPurchase)",
+    )
+    suspend fun fillTranslation(productId: String, translated: String)
 
     @Upsert
     suspend fun upsert(session: ShoppingSessionEntity)

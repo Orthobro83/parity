@@ -22,6 +22,10 @@ data class SettingsEntity(
     val rateApiKey: String?,
     val trueBlack: Boolean,
     val onboarded: Boolean,
+    /** Translate product names online when there's no offline pack (v3). */
+    @ColumnInfo(defaultValue = "1") val translateOnline: Boolean = true,
+    /** The offline pack last downloaded by itself on arriving in a country, as "ka>en" (v3). */
+    val autoPack: String? = null,
 )
 
 @Serializable

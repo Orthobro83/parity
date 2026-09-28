@@ -39,6 +39,12 @@ object Countries {
 
     fun currencyFor(countryCode: String): CurrencyCode? = currencyByCountry[countryCode.uppercase()]
 
+    /**
+     * The country a national currency belongs to: ISO 4217 codes start with the issuer's country
+     * code (GEL → GE). Null for shared currencies such as EUR or XOF, and for crypto.
+     */
+    fun homeCountryOf(currency: CurrencyCode): String? = currency.code.take(2).takeIf { currencyByCountry[it] == currency }
+
     /** Unicode regional-indicator flag for a two-letter country code, e.g. "GE" → 🇬🇪. */
     fun flag(countryCode: String): String {
         if (countryCode.length != 2) return ""

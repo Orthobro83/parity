@@ -1,6 +1,8 @@
 package app.parity.shared.app
 
 import app.parity.core.money.CurrencyCode
+import app.parity.core.money.Languages
+import app.parity.core.scan.LabelReading
 import app.parity.shared.data.BackupContents
 import app.parity.shared.data.BackupException
 import app.parity.shared.data.RestoreMode
@@ -10,6 +12,9 @@ import app.parity.shared.rates.RateResult
 import app.parity.shared.util.now
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -25,6 +30,37 @@ class SettingsController(private val graph: AppGraph) {
     private val _pendingRestore = MutableStateFlow<BackupContents?>(null)
     val pendingRestore: StateFlow<BackupContents?> = _pendingRestore
 
+    private val _offlinePacks = MutableStateFlow<Set<String>>(emptySet())
+    /** Languages with an offline translation pack on the phone. */
+    val offlinePacks: StateFlow<Set<String>> = _offlinePacks
+
+    private val _downloadingPack = MutableStateFlow<String?>(null)
+    /** The label language whose offline pack is downloading, if any. */
+    val downloadingPack: StateFlow<String?> = _downloadingPack
+
+    init {
+        // On arriving in a new country, its labels' offline translation pack downloads by itself.
+        scope.launch {
+            graph.settings.map { s -> s?.let { it.labelLanguage to it.language } }.distinctUntilChanged().collectLatest { pair ->
+                val (label, language) = pair ?: return@collectLatest
+                autoDownload(label, language)
+            }
+        }
+    }
+
+    /**
+     * Downloads the offline pack for [label] labels into [language], once per country's language:
+     * a pack removed in Settings stays removed until the labels' language changes. Languages with
+     * no offline pack (Armenian) are translated online.
+     */
+    private suspend fun autoDownload(label: String?, language: String) {
+        if (label == null || Languages.base(label) == language) return
+        val from = LabelReading.offlineSource(label, Languages.all.map { it.tag }.toSet()) ?: return
+        val key = "$from>$language"
+        if (graph.settingsRepository.current().autoPack == key) return
+        if (download(label, from, language, announce = true)) graph.settingsRepository.update { it.copy(autoPack = key) }
+    }
+
     private fun update(transform: (Settings) -> Settings) {
         scope.launch { graph.settingsRepository.update(transform) }
     }
@@ -36,6 +72,51 @@ class SettingsController(private val graph: AppGraph) {
     fun setProvider(provider: RateProviderId) = update { it.copy(rateProvider = provider) }
     fun setApiKey(key: String) = update { it.copy(rateApiKey = key.trim().ifEmpty { null }) }
     fun setTrueBlack(on: Boolean) = update { it.copy(trueBlack = on) }
+    fun setTranslateOnline(on: Boolean) = update { it.copy(translateOnline = on) }
+
+    fun refreshOfflinePacks() {
+        scope.launch { _offlinePacks.value = runCatching { graph.platform.text.offlineLanguages() }.getOrDefault(emptySet()) }
+    }
+
+    /**
+     * Downloads the offline translation pack for [labelLanguage] (about 30 MB), on any connection as
+     * the shopper asked for it, then translates names scanned without one.
+     */
+    fun downloadOfflinePack(labelLanguage: String) {
+        val settings = graph.settings.value ?: return
+        val from = LabelReading.offlineSource(labelLanguage, Languages.all.map { it.tag }.toSet()) ?: return
+        scope.launch {
+            if (!download(labelLanguage, from, settings.language, announce = true)) {
+                val name = Languages.find(labelLanguage)?.englishName ?: labelLanguage
+                graph.messages.show("Couldn't download $name. Check the connection and try again.")
+            }
+        }
+    }
+
+    /** Downloads the packs for [from] → [to] on any connection; true when they're ready. */
+    private suspend fun download(labelLanguage: String, from: String, to: String, announce: Boolean): Boolean {
+        if (runCatching { graph.platform.text.isTranslationReady(from, to) }.getOrDefault(false)) return true
+        if (_downloadingPack.value != null) return false
+        _downloadingPack.value = labelLanguage
+        val ready = try {
+            runCatching { graph.platform.text.prepare(from, to, wifiOnly = false) }.getOrDefault(false)
+        } finally {
+            _downloadingPack.value = null
+        }
+        refreshOfflinePacks()
+        if (ready) {
+            if (announce) graph.messages.show("${Languages.find(labelLanguage)?.englishName ?: labelLanguage} is ready for offline translation")
+            graph.home.retryTranslations()
+        }
+        return ready
+    }
+
+    fun removeOfflinePack(language: String) {
+        scope.launch {
+            runCatching { graph.platform.text.deleteOffline(language) }
+            refreshOfflinePacks()
+        }
+    }
 
     fun completeOnboarding(base: CurrencyCode, language: String) {
         scope.launch {

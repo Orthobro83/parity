@@ -12,29 +12,39 @@ time.
 > [Releases](https://github.com/Orthobro83/parity/releases). An iPhone version is planned.
 
 <p align="center">
-  <img src="docs/screenshots/scan-georgian.png" width="240" alt="A Georgian price tag converted to US dollars, with the product name translated">
-  <img src="docs/screenshots/currency-indicator.png" width="240" alt="A green triangle showing the dollar gained 0.189 % against the lari since the last scan">
-  <img src="docs/screenshots/multi-buy-deal.png" width="240" alt="Choosing between one item at the regular price and three with a multi-buy deal">
+  <img src="docs/screenshots/scan-georgian.png" width="200" alt="A Georgian price tag on a supermarket shelf converted to US dollars, with the product name translated">
+  <img src="docs/screenshots/currency-indicator.png" width="200" alt="A green triangle showing the dollar gained 0.317 % against the lari since the last scan">
+  <img src="docs/screenshots/multi-buy-deal.png" width="200" alt="Choosing between one item at the regular price and three with a multi-buy deal">
+  <img src="docs/screenshots/cart.png" width="200" alt="The cart, with both totals and the exchange rate in plain words">
 </p>
 
 ## Features
 
 ### Scan, convert, understand
-- **Scan price tags** with the camera. The price locks in once it reads the same in several frames.
-  You can also scan a photo from your gallery, or type a price in.
+- **Scan price tags** with the camera. The price locks in once it reads the same in several frames,
+  and only numbers written like shelf prices count, so a page of text or a clock won't pop up a
+  card. If a tag doesn't lock in, tap the white shutter to take a photo of it. You can also scan a
+  photo from your gallery, or type a price in.
 - **Your currency first:** the converted price is shown large, with the shelf price in brackets:
   **$3.84 (₾9.99)**. Over 150 fiat currencies plus 19 cryptocurrencies (BTC, ZEC, ETH, XMR and
   more).
 - **Knows where you are.** It detects the country from location, or from the mobile network when
   location is off, and switches the local currency automatically. You can always set it by hand.
-- **Reads and translates labels on the phone.** Latin-script labels are read by ML Kit. Georgian
-  and Cyrillic labels are read by Tesseract. Product names are translated into your language
-  offline once the language pack is downloaded.
+  A tag priced in another currency (¥ while you're in the euro zone) is converted from that one.
+- **Reads labels in every country's script.** Latin, Chinese, Japanese, Korean and Hindi labels
+  are read live by ML Kit; every other script (Georgian, Cyrillic, Arabic, Hebrew, Thai, Armenian,
+  Greek, Burmese, Khmer and more) by Tesseract, whose reader for your country downloads once
+  (0.4–10 MB). Prices written with other digits, such as Burmese ၁၅၀၀, are understood too.
+- **Translates product names** into your language, and leaves out advertising: "SUPER DISCOUNT" or
+  "Celebra tus ahorros" is never taken for the product's name. Names are translated online, or on
+  the phone once the country's language pack (about 30 MB) is there; it downloads by itself when
+  Parity notices you've arrived somewhere new, and can be managed in Settings.
 - **Spots sales** ("-20%", "ფასდაკლება", "скидка", "was 12.49") and keeps the pre-sale price, so
   price history isn't distorted by promotions. A **SALE** chip lets you correct it.
 - **Handles multi-buy deals:** "3+ at ₾7.99 each", "3 for $10", "1+1", "2nd at 50% off", "2/$5".
   When you tap Buy, Parity asks: *just 1 at the regular price*, or *the deal quantity at the deal
-  price*. Your answer is saved with the purchase.
+  price*. Your answer is saved with the purchase. Tags that show only the deal ("buy 3 for ₾11.20")
+  are priced per item from it.
 
 ### ▲ / ▼ — how your money is doing
 Scan a product you've scanned before and Parity compares the exchange rate then and now.
@@ -48,7 +58,9 @@ six providers, from daily (free, no key) to minute-level (CoinGecko).
 ### Shop
 - **Running total** at the top in both currencies. Each item keeps the rate it was scanned at, so
   the total doesn't drift while you shop.
-- **Cart:** tap the total to adjust quantities, or swipe an item right to remove it (with Undo).
+- **Cart:** the cart button shows how many items you have. Open it to see both totals and the
+  exchange rate in plain words ("1 USD = 2.60 GEL"), adjust quantities, or swipe an item right to
+  remove it (with Undo).
 - **Finalize** saves the trip. If items on your shopping list are still unbought, Parity lists
   them and asks: *Keep Shopping* or *Finalize purchases*.
 
@@ -69,7 +81,8 @@ six providers, from daily (free, no key) to minute-level (CoinGecko).
 
 ### Your data stays yours
 - No account and no tracking. Everything is stored on your phone. The network is only used for
-  exchange rates and one-time translation language packs.
+  exchange rates, text readers and language packs, and product names sent to MyMemory for online
+  translation (which can be turned off in Settings).
 - **Export** everything as a ZIP of CSV files (plus a simple `purchases.csv` for spreadsheets), and
   **restore** by merging or replacing.
 - **Move everything to a new phone** with cycling QR codes, encrypted with a 12-character code
@@ -93,14 +106,14 @@ certificate with the SHA-256 fingerprint listed in the release notes.
 
 ## Beta notes
 
-- Tested on an Android emulator, with realistic generated price tags in Georgian, English and
-  Russian, and on one real phone. Real shelves vary (glare, angles, store fonts), so please report
-  tags it misreads.
-- Product names are read in Latin, Georgian and Cyrillic scripts. Elsewhere (for example Arabic,
-  Hebrew, Thai, Chinese, Japanese, Korean) prices still work, but type the name yourself.
+- Tested on an Android emulator with generated price tags in 15 scripts, and on one real phone,
+  but not yet on real shelves in most of those countries. Real shelves vary (glare, angles, store
+  fonts), so please report tags it misreads.
+- Burmese product names, and prices printed only in Arabic-Indic or Persian digits (٢٥٫٩٠), don't
+  read reliably yet; type those in.
 - The default rate provider updates daily, so two scans on the same day show "=". Pick CoinGecko
   in Settings for minute-level rates.
-- Coming: analytics charts, more OCR scripts, and an iPhone version.
+- Coming: analytics charts and an iPhone version.
 
 ## Build from source
 

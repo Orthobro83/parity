@@ -211,7 +211,7 @@ class BackupService(private val db: ParityDatabase, private val appVersion: Stri
                 line.fxRate,
                 if (line.isPromo) "yes" else "no",
                 MultiBuyOffer.fromJson(line.multiBuyJson)?.describe(CurrencyCode(line.localCurrency)),
-                line.regularUnitPriceLocal,
+                line.regularUnitPriceLocal?.takeIf { MultiBuyOffer.fromJson(line.multiBuyJson)?.singlePriceShown != false },
             )
         }
         return Csv.write(header, rows)

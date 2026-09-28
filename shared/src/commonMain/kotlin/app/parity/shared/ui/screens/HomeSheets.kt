@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import app.parity.core.fx.formatPercent
 import app.parity.core.fx.formatPercentPrecise
 import app.parity.core.fx.formatRate
+import app.parity.core.fx.formatRatePlain
 import app.parity.core.money.MoneyFormat
 import app.parity.core.money.MoneyMath
 import app.parity.core.money.decimal
@@ -68,6 +69,7 @@ import app.parity.shared.ui.components.PillButton
 import app.parity.shared.ui.components.RoundIconButton
 import app.parity.shared.ui.formatDate
 import app.parity.shared.ui.parseUserAmount
+import app.parity.shared.ui.plural
 import app.parity.shared.ui.theme.Parity
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 
@@ -125,18 +127,26 @@ private fun DealChoices(card: ScanCard, deal: MultiBuyOffer, onAdd: (BigDecimal,
     Text(deal.describe(card.localCurrency), style = Parity.type.body, color = c.accent)
     card.name?.let { Text(it, style = Parity.type.caption, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     Spacer(Modifier.height(16.dp))
-    ChoiceCard(
-        title = "Just 1 at the regular price",
-        amount = pricePair(card, regular),
-        detail = null,
-        highlighted = false,
-        onClick = { onAdd(BigDecimal.ONE, false) },
-    )
-    Spacer(Modifier.height(10.dp))
+    // A deal-only tag has no single price to offer.
+    if (deal.singlePriceShown) {
+        ChoiceCard(
+            title = "Just 1 at the regular price",
+            amount = pricePair(card, regular),
+            detail = null,
+            highlighted = false,
+            onClick = { onAdd(BigDecimal.ONE, false) },
+        )
+        Spacer(Modifier.height(10.dp))
+    }
     ChoiceCard(
         title = "${deal.quantity} with the deal",
         amount = pricePair(card, dealTotal),
-        detail = "${pricePair(card, deal.dealUnitPrice(regular))} each · save ${MoneyFormat.format(saving, card.localCurrency)}",
+        // On a deal-only tag the card's price already is the deal's price per item.
+        detail = if (deal.singlePriceShown) {
+            "${pricePair(card, deal.dealUnitPrice(regular))} each · save ${MoneyFormat.format(saving, card.localCurrency)}"
+        } else {
+            "${pricePair(card, regular)} each"
+        },
         highlighted = true,
         onClick = { onAdd(BigDecimal.fromInt(deal.quantity), true) },
     )
@@ -174,8 +184,10 @@ private fun ChoiceCard(title: String, amount: String, detail: String?, highlight
 
 @Composable
 private fun QuantityStepper(card: ScanCard, deal: MultiBuyOffer?, onAdd: (BigDecimal, Boolean) -> Unit, onDismiss: () -> Unit) {
-    var useDeal by remember { mutableStateOf(false) }
-    var text by remember { mutableStateOf("1") }
+    // On a deal-only tag the deal is the only price there is.
+    val dealOnly = deal != null && !deal.singlePriceShown
+    var useDeal by remember { mutableStateOf(dealOnly) }
+    var text by remember { mutableStateOf(if (dealOnly) deal!!.quantity.toString() else "1") }
     val quantity = parseUserAmount(text)
     val step = if (useDeal && deal != null) deal.step else 1
     Text("How many?", style = Parity.type.headline)
@@ -224,7 +236,11 @@ private fun QuantityStepper(card: ScanCard, deal: MultiBuyOffer?, onAdd: (BigDec
         Spacer(Modifier.height(12.dp))
         Text(pricePair(card, total), style = Parity.type.priceSmall, color = Parity.colors.textSecondary)
         if (useDeal && deal != null && (units == null || !deal.appliesTo(units))) {
-            Text("The deal needs ${deal.quantity}; this is the regular price.", style = Parity.type.caption, color = Parity.colors.sale)
+            Text(
+                if (dealOnly) "The deal needs ${deal.quantity}, and the tag shows no single price: this uses the deal's price per item."
+                else "The deal needs ${deal.quantity}; this is the regular price.",
+                style = Parity.type.caption, color = Parity.colors.sale,
+            )
         }
     }
     Spacer(Modifier.height(20.dp))
@@ -238,6 +254,7 @@ private fun QuantityStepper(card: ScanCard, deal: MultiBuyOffer?, onAdd: (BigDec
 @Composable
 fun DealDialog(card: ScanCard, onSave: (MultiBuyOffer?) -> Unit, onDismiss: () -> Unit) {
     val existing = card.multiBuy
+    val dealOnly = existing?.singlePriceShown == false
     var units by remember { mutableStateOf(existing?.quantity?.toString() ?: "3") }
     var price by remember { mutableStateOf(existing?.dealUnitPrice(card.localPrice)?.toFixed(2) ?: "") }
     val n = units.toIntOrNull()?.takeIf { it in 2..20 }
@@ -249,37 +266,49 @@ fun DealDialog(card: ScanCard, onSave: (MultiBuyOffer?) -> Unit, onDismiss: () -
         shape = RoundedCornerShape(28.dp),
         title = { Text(if (existing == null) "Add a deal" else "Deal", style = Parity.type.headline) },
         text = {
-            Column {
-                Text("Regular price: ${MoneyFormat.format(card.localPrice, card.localCurrency)}", style = Parity.type.body, color = Parity.colors.textSecondary)
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = units, onValueChange = { units = it.filter(Char::isDigit).take(2) }, label = { Text("Buy") },
-                        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        shape = RoundedCornerShape(18.dp), colors = parityTextFieldColors(), modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = price, onValueChange = { price = it.take(10) }, label = { Text("Deal price") },
-                        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        shape = RoundedCornerShape(18.dp), colors = parityTextFieldColors(), modifier = Modifier.weight(1.4f),
+            if (dealOnly) {
+                // The price per item comes from the deal, so the deal can only be kept or removed.
+                Column {
+                    Text(existing!!.describe(card.localCurrency), style = Parity.type.body, color = Parity.colors.accent)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "The tag shows only this deal, so the price per item comes from it. Remove it if the price is for one item.",
+                        style = Parity.type.caption, color = Parity.colors.textSecondary,
                     )
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    when {
-                        offer != null -> offer.describe(card.localCurrency)
-                        n != null && amount != null -> "That isn't cheaper than the regular price."
-                        else -> "Enter the price per item, or the total for all of them."
-                    },
-                    style = Parity.type.caption,
-                    color = if (offer != null) Parity.colors.accent else Parity.colors.textSecondary,
-                )
+            } else {
+                Column {
+                    Text("Regular price: ${MoneyFormat.format(card.localPrice, card.localCurrency)}", style = Parity.type.body, color = Parity.colors.textSecondary)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = units, onValueChange = { units = it.filter(Char::isDigit).take(2) }, label = { Text("Buy") },
+                            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(18.dp), colors = parityTextFieldColors(), modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = price, onValueChange = { price = it.take(10) }, label = { Text("Deal price") },
+                            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            shape = RoundedCornerShape(18.dp), colors = parityTextFieldColors(), modifier = Modifier.weight(1.4f),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        when {
+                            offer != null -> offer.describe(card.localCurrency)
+                            n != null && amount != null -> "That isn't cheaper than the regular price."
+                            else -> "Enter the price per item, or the total for all of them."
+                        },
+                        style = Parity.type.caption,
+                        color = if (offer != null) Parity.colors.accent else Parity.colors.textSecondary,
+                    )
+                }
             }
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (existing != null) PillButton("Remove", { onSave(null) }, primary = false, destructive = true)
-                PillButton("Save", { onSave(offer) }, height = 44.dp, enabled = offer != null)
+                if (!dealOnly) PillButton("Save", { onSave(offer) }, height = 44.dp, enabled = offer != null)
             }
         },
         dismissButton = { PillButton("Cancel", onDismiss, primary = false) },
@@ -294,14 +323,26 @@ fun CartSheet(graph: AppGraph, settings: Settings, onDismiss: () -> Unit) {
     ParitySheet(onDismiss, skipPartial = false) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Cart", style = Parity.type.headline, modifier = Modifier.weight(1f))
-            summary?.let { s ->
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(MoneyFormat.format(s.totalBase, s.baseCurrency), style = Parity.type.price)
-                    s.localTotals.filterKeys { it != s.baseCurrency }.forEach { (code, total) ->
-                        Text("(${MoneyFormat.format(total, code)})", style = Parity.type.priceSmall, color = Parity.colors.textSecondary)
-                    }
+            summary?.let { s -> Text(plural(s.count, "item"), style = Parity.type.body, color = Parity.colors.textSecondary) }
+        }
+        summary?.let { s ->
+            // Your currency first, the local total beside it, then the rate that links them (design §7).
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(MoneyFormat.format(s.totalBase, s.baseCurrency), style = Parity.type.price)
+                val locals = s.localTotals.filterKeys { it != s.baseCurrency }
+                if (locals.isNotEmpty()) {
+                    Text(
+                        locals.entries.joinToString("  ") { (code, total) -> "(${MoneyFormat.format(total, code)})" },
+                        style = Parity.type.priceSmall, color = Parity.colors.textSecondary,
+                        modifier = Modifier.padding(start = 10.dp, bottom = 2.dp),
+                    )
                 }
             }
+            s.rates.forEach { (code, rate) ->
+                Text("1 ${s.baseCurrency.code} = ${formatRatePlain(rate)} ${code.code}", style = Parity.type.body, color = Parity.colors.textSecondary)
+            }
+            Spacer(Modifier.height(6.dp))
         }
         if (summary?.missingRates == true) {
             Text("Some items were scanned without an exchange rate and aren't in the converted total.", style = Parity.type.caption, color = Parity.colors.sale)
@@ -352,8 +393,12 @@ private fun CartRow(item: CartItem, settings: Settings, onQuantity: (BigDecimal)
                 )
                 item.offer?.let { deal ->
                     Text(
-                        if (item.dealApplied) "Deal: ${deal.describe(item.localCurrency)} · regular ${MoneyFormat.format(item.regularUnit, item.localCurrency)}"
-                        else "Deal needs ${deal.quantity}; regular price for now",
+                        when {
+                            !item.dealApplied && !deal.singlePriceShown -> "Deal needs ${deal.quantity}; priced at the deal's rate"
+                            !item.dealApplied -> "Deal needs ${deal.quantity}; regular price for now"
+                            !deal.singlePriceShown -> "Deal: ${deal.describe(item.localCurrency)}"
+                            else -> "Deal: ${deal.describe(item.localCurrency)} · regular ${MoneyFormat.format(item.regularUnit, item.localCurrency)}"
+                        },
                         style = Parity.type.caption, color = if (item.dealApplied) c.accent else c.sale,
                     )
                 }

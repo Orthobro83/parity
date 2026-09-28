@@ -179,7 +179,7 @@ fun SessionDetailScreen(detail: SessionDetail, onClose: () -> Unit, onRenameStor
                         if (deal != null) {
                             Text(
                                 "Deal: ${deal.describe(local)}" +
-                                    (line.regularUnitPriceLocal?.let { " · regular ${MoneyFormat.format(decimal(it), local)}" } ?: ""),
+                                    (line.regularUnitPriceLocal?.takeIf { deal.singlePriceShown }?.let { " · regular ${MoneyFormat.format(decimal(it), local)}" } ?: ""),
                                 style = Parity.type.caption, color = c.accent,
                             )
                         }

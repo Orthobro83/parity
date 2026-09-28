@@ -17,6 +17,10 @@ data class Box(val left: Float, val top: Float, val right: Float, val bottom: Fl
     )
 
     fun horizontalOverlap(other: Box): Float = (minOf(right, other.right) - maxOf(left, other.left)).coerceAtLeast(0f)
+
+    fun contains(x: Float, y: Float): Boolean = x in left..right && y in top..bottom
+
+    fun intersects(other: Box): Boolean = left < other.right && other.left < right && top < other.bottom && other.top < bottom
 }
 
 /** One word-level piece of recognized text. */

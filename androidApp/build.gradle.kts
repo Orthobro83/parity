@@ -20,8 +20,8 @@ android {
         applicationId = "app.parity"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0-beta.1"
+        versionCode = 6
+        versionName = "0.3.0-beta.4"
     }
 
     // One APK per CPU type: ML Kit, translation and Tesseract ship large native libraries, so a
@@ -81,6 +81,11 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
     implementation(libs.mlkit.text)
+    // Chinese, Japanese, Korean and Devanagari labels, read live like Latin ones (design §14).
+    implementation(libs.mlkit.text.chinese)
+    implementation(libs.mlkit.text.japanese)
+    implementation(libs.mlkit.text.korean)
+    implementation(libs.mlkit.text.devanagari)
     implementation(libs.mlkit.barcode)
     implementation(libs.mlkit.langid)
     implementation(libs.mlkit.translate)

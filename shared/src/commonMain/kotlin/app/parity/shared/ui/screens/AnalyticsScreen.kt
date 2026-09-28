@@ -31,6 +31,7 @@ import app.parity.core.money.CurrencyCode
 import app.parity.core.money.MoneyFormat
 import app.parity.core.money.decimal
 import app.parity.core.money.divideMoney
+import app.parity.core.scan.MultiBuyOffer
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.PriceObservationEntity
 import app.parity.shared.data.Settings
@@ -62,7 +63,9 @@ fun AnalyticsScreen(graph: AppGraph, settings: Settings) {
         .filter { it.key.first != it.key.second }
         .map { (key, obs) -> PairTrend(CurrencyCode(key.first), CurrencyCode(key.second), obs.first(), obs.last(), obs.size) }
     // Sale prices are noise for price tracking: use the regular price if the tag showed one, else skip.
+    // So is the per-item price worked out from a tag that shows only a multi-buy deal.
     val productTrends = withRates
+        .filter { o -> MultiBuyOffer.fromJson(o.multiBuyJson)?.singlePriceShown != false }
         .mapNotNull { o -> if (!o.isPromo) o else o.regularPrice?.let { o.copy(price = it) } }
         .filter { it.baseCurrency == settings.baseCurrency.code }
         .groupBy { it.productId }

@@ -41,6 +41,7 @@ import app.parity.core.money.Countries
 import app.parity.core.money.Currencies
 import app.parity.core.money.Languages
 import app.parity.core.fx.formatRate
+import app.parity.core.scan.LabelReading
 import app.parity.shared.app.AppGraph
 import app.parity.shared.data.RestoreMode
 import app.parity.shared.data.Settings
@@ -61,6 +62,9 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
     val rate by controller.rate.collectAsState()
     val pendingRestore by controller.pendingRestore.collectAsState()
     val locationGranted by graph.platform.permissions.location.collectAsState()
+    val offlinePacks by controller.offlinePacks.collectAsState()
+    val downloadingPack by controller.downloadingPack.collectAsState()
+    LaunchedEffect(Unit) { controller.refreshOfflinePacks() }
     var picker by remember { mutableStateOf<Picker?>(null) }
     var apiKey by remember(settings.rateProvider) { mutableStateOf(settings.rateApiKey ?: "") }
     val c = Parity.colors
@@ -98,6 +102,45 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
                     controller.setLocalCurrencyOverride(null)
                     graph.location.refresh()
                 }
+            }
+        }
+
+        SectionHeader("Translation")
+        Group {
+            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Translate online", style = Parity.type.body)
+                    Text(
+                        "Product names are sent to MyMemory (translated.net) to translate when there's no offline pack. Nothing else is sent.",
+                        style = Parity.type.caption, color = c.textSecondary,
+                    )
+                }
+                Switch(
+                    checked = settings.translateOnline,
+                    onCheckedChange = controller::setTranslateOnline,
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent, checkedThumbColor = c.onAccent),
+                )
+            }
+            val label = settings.labelLanguage
+            val labelName = label?.let { Languages.find(it)?.englishName }
+            val packSource = label?.let { LabelReading.offlineSource(it, Languages.all.map { lang -> lang.tag }.toSet()) }
+            when {
+                label == null || labelName == null || Languages.base(label) == settings.language -> Unit
+                packSource == null -> Text(
+                    "$labelName has no offline pack, so it's translated online.",
+                    style = Parity.type.caption, color = c.textSecondary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                downloadingPack == label -> SettingRow("$labelName for offline use", "Downloading… (about 30 MB)") {}
+                packSource in offlinePacks -> SettingRow("$labelName for offline use", "Downloaded · tap to remove (it's then translated online)") {
+                    controller.removeOfflinePack(packSource)
+                }
+                else -> SettingRow("Download $labelName for offline use", "About 30 MB · then names translate without a connection") {
+                    controller.downloadOfflinePack(label)
+                }
+            }
+            offlinePacks.filter { it != settings.language && it != "en" && it != packSource }.sorted().forEach { pack ->
+                val name = Languages.find(pack)?.englishName ?: pack
+                SettingRow("Remove $name offline pack", "Frees about 30 MB; $name is then translated online") { controller.removeOfflinePack(pack) }
             }
         }
 
@@ -187,7 +230,10 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Parity ${graph.appVersion}", style = Parity.type.body)
                 Text("Source Sans 3 (SIL Open Font License). Tesseract language data (Apache 2.0).", style = Parity.type.caption, color = c.textSecondary)
-                Text("Everything stays on this phone. Only exchange-rate requests and translation model downloads use the network.", style = Parity.type.caption, color = c.textSecondary)
+                Text(
+                    "Everything stays on this phone. The network is only used for exchange rates, text readers and translation packs, and product names when translating online.",
+                    style = Parity.type.caption, color = c.textSecondary,
+                )
             }
         }
         Spacer(Modifier.height(32.dp))

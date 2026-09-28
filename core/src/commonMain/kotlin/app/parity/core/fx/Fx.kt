@@ -2,6 +2,7 @@ package app.parity.core.fx
 
 import app.parity.core.money.CurrencyCode
 import app.parity.core.money.MINUS
+import app.parity.core.money.MoneyFormat
 import app.parity.core.money.MoneyMath
 import app.parity.core.money.divideMoney
 import app.parity.core.money.toFixed
@@ -87,6 +88,10 @@ fun formatPercentPrecise(fraction: BigDecimal, decimals: Int = 10): String {
     val text = pct.abs().toFixed(decimals).trimEnd('0').trimEnd('.')
     return "$sign$text %"
 }
+
+/** A rate to read at a glance, as in "1 USD = 2.69 GEL": 2 decimals, or 4 significant digits below 1. */
+fun formatRatePlain(value: BigDecimal): String =
+    if (value >= BigDecimal.ONE) MoneyFormat.plain(value, 2) else formatRate(value, 4)
 
 /** A rate for display: at most [significantDigits] significant digits, no trailing zeros. */
 fun formatRate(value: BigDecimal, significantDigits: Int = 8): String = roundSignificant(value, significantDigits).toPlainString()

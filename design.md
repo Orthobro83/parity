@@ -108,9 +108,9 @@ The shopping list gets its own tab. It is also visible from Home as a compact ov
 
 ```
 ┌──────────────────────────────────────────┐
-│  $42.18  (₾113.40)            ▾ 6 items  │  ← Running total bar (tap = expand cart)
-├──────────────────────────────────────────┤
-│                                          │
+│  $42.18  (₾113.40)                    ▾  │  ← Running total bar (tap = expand cart)
+│ (🛒⁶)                              (🖼)  │  ← Cart button with item count · scan a photo
+│                                    (⌨)  │  ← Type a price
 │            CAMERA  PREVIEW               │
 │      ┌──────────────────────────┐        │
 │      │  $3.71  (₾9.99)     ▲ 2.1%│       │  ← Result card anchored near detected tag
@@ -118,7 +118,7 @@ The shopping list gets its own tab. It is also visible from Home as a compact ov
 │      │  SALE                     │       │  ← Sale chip (if detected)
 │      │   [ Cancel ]   [ Buy ]    │       │
 │      └──────────────────────────┘        │
-│                                          │
+│                  ( ◯ )                   │  ← Shutter (while no card is showing)
 │  List: ☐ coffee ☐ cheese ~~chicken~~ …   │  ← Collapsible shopping-list strip
 ├──────────────────────────────────────────┤
 │           [   Finalize (6)   ]           │  ← Visible once cart is non-empty
@@ -126,6 +126,11 @@ The shopping list gets its own tab. It is also visible from Home as a compact ov
 │   🏠     📝     🕘     📈     ⚙️          │
 └──────────────────────────────────────────┘
 ```
+
+- The **cart button** (top left) shows how many items are in the cart and opens the cart list (§7).
+- The **shutter**, a small white circle, takes a full-resolution photo of what's on screen when live
+  scanning doesn't pick a tag up (§6.1).
+- There is no torch button: supermarkets are brightly lit.
 
 ### 4.2 Visual design
 
@@ -246,6 +251,18 @@ CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
 ```
 
 ### 6.1 Price extraction
+- The camera reads **only what the preview shows**. The sensor sees more than the screen (the preview
+  fills it by cropping the sides), and text out of view, such as a neighbouring tag or a toolbar on
+  a photographed screen, must not be read. Frames are cropped to the preview's viewport.
+- **Live scanning is strict.** A number only makes a result card when it is written like a shelf
+  price: with a currency sign, or with the local currency's decimals (`9.99`, `9,99`, not `250` or
+  `2026`); it isn't a figure inside a sentence; and when the frame has several lines of text, it
+  stands out from them, as prices do on tags. Rulers, clocks, page numbers, years and numbers in
+  running text no longer produce cards.
+- **The shutter** is for tags that live scanning misses: it takes a full-resolution photo (scaled to
+  at most 3,000 px) and reads it without the strictness, like a photo from the gallery. If no price
+  is found, a message says so and suggests typing it in. Cards from the shutter, a photo or typing
+  stay until the shopper is done with them; only live cards are replaced by the next tag in view.
 - Regex over each line for amounts with an optional currency symbol or code on either side:
   `₾ 9.99`, `9,99 ₾`, `9.99 GEL`, `$3.49`, `1 299,00 ₽`.
 - **Decimal and grouping separators:** decide from the locale of the detected country first, then fall
@@ -260,15 +277,53 @@ CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
   block sits at the top-right of a large integer block.
 - If two candidates score within 10 % of each other, the card shows both as chips and the user taps
   the right one. That choice is saved as a training signal for that store's tag layout.
-- If the detected currency symbol contradicts the current local currency, the card asks the user to
-  confirm.
+- **A currency printed on the tag wins** (0.3.0-beta.3). A ¥ tag while the local currency is the
+  euro is converted from yen, and the card says "Priced in Yen" with the local currency one tap away
+  in case the symbol was misread. (Before, the card converted the number as if it were in the local
+  currency until the user chose, which showed ¥2,150 as €2,150.)
 
 ### 6.2 Product name and translation
 - Name candidate: the longest non-numeric text block near the price, excluding boilerplate words
   ("price", "цена", "ფასი", unit strings).
-- ML Kit Language ID runs on it. If the language differs from the user's language and confidence is at
-  least 0.5, it is translated on-device.
-- The card shows the translated name, with the original in smaller grey text underneath.
+- **Advertising isn't a name** (0.3.0-beta.4). Stores print deal banners and slogans in big letters
+  where a name would be ("SUPER DISCOUNT", "¡OFERTA!", "Celebra tus ahorros"). A line that's mostly
+  marketing words (a vocabulary in a dozen languages, plus sale words in many more, compared
+  without accents and ignoring little words like "tus") is never the name unless it also gives a
+  quantity ("Super Bock 6 x 330 ml"). Among the rest, lines with a quantity ("1 L", "500 g",
+  "12 pzas") rank higher, and marketing words or exclamation marks lower. Sale words ("discount",
+  "oferta") still mark the sale.
+- **Label language.** The labels' language comes from the country, except when the local currency
+  was set by hand to another country's: lari means Georgian labels even while located in the US.
+- **Scripts the fast recognizer can't read** (Georgian, Cyrillic, …): the name comes only from the
+  script-aware engine (§14), never from the Latin recognizer, which turns the name into gibberish
+  and may pick stray Latin text elsewhere in view. Lines in the label's script win; Latin-only text
+  is kept only when the Latin recognizer read the same there (a brand such as "Pringles"). With no
+  readable name the card asks the user to type one, rather than show junk.
+- **A sharper picture for small print.** Live frames show a tag's name only 15–25 px tall. When the
+  live scan locks on a tag in such a script, the app takes a full-resolution still of the same view
+  and reads the name and wording from that, if it still shows the same price.
+- **Translation source.** A name in the label's own script is in the label's language (language ID
+  tells Russian from Ukrainian; for Chinese, Japanese and Korean the labels decide, since kanji-only
+  Japanese reads as Chinese). Latin text on such a tag is kept as printed. For Latin-script labels
+  the country's label language decides: language ID can't be trusted with a few words (Spanish
+  "Oferta" reads as Portuguese or Italian). It's overruled only when it finds the user's own language
+  (nothing to translate) or another language common on labels there (French in Switzerland), or
+  when the labels are in the user's language anyway (imported products).
+- **Translation route** (0.3.0-beta.4). With an offline pack for the language on the phone, on the
+  phone; otherwise online through MyMemory (free, no key, about 5,000 characters a day per network),
+  which only receives the product name. MyMemory's first answer can be a stray entry from its shared
+  memory ("牛奶" → "Susu", Malay), so its machine translation is used when offered, otherwise the
+  remembered answers for exactly that text that agree with each other, and an answer that language
+  ID says isn't in the user's language is skipped. Online translation can be turned off in Settings.
+- **Offline packs** (about 30 MB each) download by themselves when the app detects a new country,
+  on any connection, once per label language: a pack removed in Settings stays removed until the
+  country changes. Settings shows the current country's pack and removes others. Languages with no
+  offline pack (Armenian, Burmese, Khmer…) are translated online. Serbian and Bosnian use the
+  Croatian pack, Serbian Cyrillic being written in Latin letters first.
+- The card shows the translated name, with the original in smaller grey text underneath, and says
+  when a name is waiting ("Will translate when you're online · or download Georgian in Settings").
+  Names read without a translation are translated when that becomes possible (a connection, a pack,
+  online translation turned on), including in History.
 - Users can edit the name. Edits are stored on the `Product` so the next scan uses them.
 
 ### 6.3 Sale detection
@@ -303,6 +358,11 @@ Matching is done in order of preference:
   - If the cart contains more than one local currency (for example, the user crosses a border
     mid-session), the brackets show the currency of the current location, and the expanded list shows
     each line in its own currency.
+- **Cart button.** A round cart button at the top left of the camera view shows the number of items
+  in the cart and opens the same list as the bar.
+- **Cart header.** The top of the list shows the total in the user's currency with the local total
+  beside it in brackets, and just below, the exchange rate in plain words: "1 USD = 2.69 GEL". The
+  rate is the one the items were scanned at, weighted by what they cost, so it matches the two totals.
 - **Tapping the bar** expands it into a bottom sheet listing the cart:
   - each row shows the name, `qty × unit price`, and the line total in base (local), with −/+ steppers;
   - **swipe right** removes a row, with a 5-second **Undo** snackbar;
@@ -332,6 +392,16 @@ Stores often price a single unit and add a deal for several: "from 3, ₾7.99 ea
 - **Cart and History.** Each line stores whether the deal was chosen. The effective unit price, the
   exact line total, the regular unit price and the deal are saved with the purchase and shown in
   History ("3 × $3.07 (₾7.99) · Deal: 3+ at ₾7.99 each · regular ₾9.99") and in `purchases.csv`.
+- **Deal-only tags** (0.3.0-beta.2). Some tags show only the deal, with no single price:
+  "შეიძინეთ 3 ცალი ₾11.20-ად" (buy 3 for ₾11.20). When deal wording names a purchase ("buy 3",
+  "3 for", "შეიძინეთ 3") and no other price is on the tag, the deal's unit price stands in for the
+  single price: the card shows "$1.43 (₾3.73 each)" and "Only the deal is on the tag: 3 for ₾11.20 →
+  $4.30". Buy offers only the deal quantity (or another quantity at the unit price), History shows
+  no "regular" price, and analytics leaves these prices out. A bare "3+" isn't enough, since it can
+  be an age rating. Removing the deal restores the printed price as the single price.
+- **Misread letters.** The fast recognizer can read a Georgian letter as a digit ("ც" as "6"). A
+  whole number that the script-aware reading doesn't see on its row is dropped, and a pack size
+  ("3 ცალი") only makes a deal with a price written like one on its line.
 - **Corrections.** The DEAL chip on the result card adds, edits or removes a deal the camera
   missed; manual price entry has optional deal fields.
 - **Data.** Schema v2 adds `price_observation.multiBuyJson`, `cart_line.multiBuy`, and
@@ -675,15 +745,42 @@ Display rounding:
 
 ---
 
-## 14. OCR language coverage (known risk)
+## 14. OCR language coverage
 
-- The ML Kit on-device recognizers cover Latin, Chinese, Devanagari, Japanese, and Korean scripts.
-  **Georgian (Mkhedruli), Cyrillic, Arabic, Hebrew, Thai, and Greek are not well covered.**
-- Mitigations:
+Every country the app knows has a label language (the one most shelf tags lead with), and every
+label language has a reader. A test checks both for all 245 countries.
+
+- **Built in (ML Kit, read live):** Latin, Chinese, Japanese, Korean and Devanagari (Hindi, Nepali)
+  scripts, about 4 MB each per CPU type. In those countries the live camera reads names directly.
+- **Tesseract, for every other script:** Georgian, Cyrillic (Russian, Ukrainian, Belarusian,
+  Bulgarian, Macedonian, Serbian, Kazakh, Kyrgyz, Tajik, Mongolian), Armenian, Greek, Hebrew,
+  Arabic (Arabic, Persian, Urdu, Pashto), Thai, Lao, Khmer, Burmese, Sinhala, Bengali, Tamil,
+  Telugu, Kannada, Malayalam, Gujarati, Punjabi, Amharic, Tigrinya, Dhivehi and more. Georgian,
+  Russian and English models ship in the app; the others (0.4–10 MB) download from the tessdata_fast
+  4.1.0 release when a country needs them, and are used only if their SHA-256 matches the one pinned
+  in the app. Until a model is on the phone, the card says reading those labels needs a connection
+  once.
+- **Prices in other digits** (Arabic-Indic ٢٥٫٩٠, Persian ۱۲۰, Devanagari, Thai, Burmese, full-width
+  ２５０) are read as ordinary digits. The live camera's Latin reader can't see such digits; the shutter
+  and gallery photos fall back to reading the whole photo with Tesseract when no price is found.
+  Tesseract reads Burmese digits well, but Arabic-Indic and Persian digits poorly (٢٥٫٩٠ → nothing,
+  ۱۲۰٬۰۰۰ → ۱۳۰/۰ in tests), so prices printed only in those need typing; supermarkets in those
+  countries mostly print Western digits, which read reliably.
+- **Tags priced in another currency** (¥ while in the euro zone) are converted from that currency
+  (§6.1); currency marks in many scripts are known (ر.س, ₪, ৳, ៛, ₭, ကျပ်, ብር…), and ones shared by
+  several currencies resolve to the local one ("$", "¥", "kr", "ريال").
+- Mitigations for hard cases:
   - **Prices** are digits plus symbols, which the Latin model reads reliably in every country, so
     conversion always works.
-  - **Product names** in unsupported scripts are routed to Tesseract with the relevant language pack.
-    Packs download on the first visit to that country, over Wi-Fi by default.
+  - Tesseract first reads the area around the price with automatic page segmentation, which reads
+    banners and prices best. On a busy background (a tag photographed on a screen, glare) that can
+    find nothing at all, so sparse-text mode and then a larger scale are tried until words turn up. If
+    the tag's name still isn't found, a focused read of the area above the price follows.
+  - The area takes in whole lines of text around the price (names often start well left of it).
+    Images are scaled so letters are about 36 px tall (0.5–3×), and the contrast is stretched so the
+    ink is black and the tag white.
+  - Deal, sale and unit words that Tesseract gets a letter wrong in ("შეიძინეტ" for "შეიძინეთ")
+    still count, and deal wording is left out of names.
   - If OCR confidence is low, the card shows "Name not recognized — tap to type or photograph." A
     photo is kept as a thumbnail so the product can still be recognized by barcode or image later.
 - Future option: an opt-in cloud vision/LLM fallback for names, off by default for privacy.
@@ -812,3 +909,12 @@ Where the Phase 1 build differs from the sections above, and why. PROGRESS.md tr
 | API keys (§16) | Android Keystore | Stored in the app database, never exported | Phase 1 simplification; only optional providers need keys |
 | Packaging | — | One APK per CPU type (arm64 release ≈ 59 MB) | ML Kit translation/OCR and Tesseract native libraries dominate size |
 | Analytics (§10) | Charts | Phase 1 summary: currency vs local per pair, and per-product change split into shelf price and currency effect | Full charts are M5, after Phase 1; all data is already recorded |
+| Names on Georgian tags (§6.2) | — | 0.3.0-beta.2: the name comes only from Tesseract; no fallback to ML Kit's reading | 0.2.0 fell back to ML Kit's reading when Tesseract's page segmentation found nothing, which showed stray Latin text ("Visible layers") as the product name |
+| Label language (§6.2) | By country | Country, or the home country of a local currency set by hand | Testing Georgian tags outside Georgia with the currency set to GEL used Latin OCR |
+| Live scanning (§6.1) | Any price-like number | Strict: shelf-price formatting, not in a sentence, prominent; frames cropped to the preview; a shutter for the rest | Random text and numbers in view produced cards |
+| Torch (§4.1) | Torch button | Removed | Supermarkets are brightly lit |
+| Coverage (§14) | Latin, Georgian, Cyrillic names | Every country: ML Kit for Latin/CJK/Devanagari, Tesseract (downloaded, pinned) for the rest | Every country and language in the app should be usable |
+| Translation (§6.2) | Offline packs, downloaded on Wi-Fi | Online (MyMemory) unless a pack is on the phone; the country's pack downloads by itself on arrival | 1.7 GB of packs can't ship in the app; beta.3 guessed wrong languages and downloaded their packs |
+| Names (§6.2) | Most name-like line | Advertising (banners, slogans) excluded; lines with quantities preferred | A store test took "Super Discount" and "Celebra tus ahorros" for names |
+| Printed currency (§6.1) | Ask which currency applies | Convert from the printed currency; local one tap away | Asking first showed a wrong conversion (¥2,150 as €2,150) |
+| Georgian names (§6.2, §14) | Read from the camera frame | From a full-resolution still taken on lock; Tesseract input scaled by text size and contrast-stretched; reading area widened to whole lines | On a phone, live frames gave partial names ("ილოგრა (", "It's.") |

@@ -14,16 +14,20 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -34,10 +38,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.FlashlightOff
-import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,15 +57,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.parity.core.money.Currencies
 import app.parity.core.money.CurrencyCode
+import app.parity.core.money.Languages
 import app.parity.core.money.MoneyFormat
+import app.parity.core.scan.LabelReading
 import app.parity.shared.app.AppGraph
 import app.parity.shared.app.CartSummary
 import app.parity.shared.app.NameStatus
 import app.parity.shared.app.ScanCard
+import app.parity.shared.app.TranslationStatus
 import app.parity.shared.data.Settings
 import app.parity.shared.data.ShoppingListItemEntity
 import app.parity.shared.platform.ScanMode
@@ -74,6 +82,7 @@ import app.parity.shared.ui.components.RollingText
 import app.parity.shared.ui.components.RoundIconButton
 import app.parity.shared.ui.components.strikeThrough
 import app.parity.shared.ui.formatAge
+import app.parity.shared.ui.plural
 import app.parity.shared.ui.theme.Parity
 import app.parity.shared.util.now
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
@@ -85,6 +94,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
     val home = graph.home
     val card by home.card.collectAsState()
+    val capturing by home.capturing.collectAsState()
     val summary by home.summary.collectAsState()
     val banner by graph.location.banner.collectAsState()
     val cameraGranted by graph.platform.permissions.camera.collectAsState()
@@ -98,7 +108,6 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
     var editingName by remember { mutableStateOf<ScanCard?>(null) }
     var fxDetail by remember { mutableStateOf<ScanCard?>(null) }
     var editingDeal by remember { mutableStateOf<ScanCard?>(null) }
-    var torch by remember { mutableStateOf(false) }
 
     val overlay = showCart || buying != null || manualEntry || finalizeItems != null || editingName != null ||
         fxDetail != null || editingDeal != null
@@ -137,19 +146,14 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(8.dp))
             TotalBar(summary, settings, Modifier.fillMaxWidth()) { if (summary != null) showCart = true }
-            // Camera controls in a column on the right, so the totals keep the full width.
-            Column(
-                Modifier.align(Alignment.End).padding(top = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                RoundIconButton(
-                    icon = if (torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
-                    contentDescription = if (torch) "Turn torch off" else "Turn torch on",
-                    onClick = { torch = !torch; graph.platform.camera.setTorch(torch) },
-                    background = Parity.colors.glass,
-                )
-                RoundIconButton(Icons.Rounded.PhotoLibrary, "Scan a photo", home::scanPhoto, background = Parity.colors.glass)
-                RoundIconButton(Icons.Rounded.Keyboard, "Type a price", { manualEntry = true }, background = Parity.colors.glass)
+            // The cart on the left and camera controls on the right, so the totals keep the full width.
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.Top) {
+                CartButton(summary?.count ?: 0, onClick = { showCart = true })
+                Spacer(Modifier.weight(1f))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RoundIconButton(Icons.Rounded.PhotoLibrary, "Scan a photo", home::scanPhoto, background = Parity.colors.glass)
+                    RoundIconButton(Icons.Rounded.Keyboard, "Type a price", { manualEntry = true }, background = Parity.colors.glass)
+                }
             }
             AnimatedVisibility(banner != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
                 banner?.let { b ->
@@ -166,16 +170,20 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
 
             Spacer(Modifier.weight(1f))
 
-            AnimatedVisibility(card == null && summary == null && cameraGranted, enter = fadeIn(), exit = fadeOut()) {
-                Box(Modifier.fillMaxWidth().padding(bottom = 24.dp), contentAlignment = Alignment.Center) {
-                    GlassPanel(shape = CircleShape) {
-                        Text(
-                            "Point at a price tag",
-                            style = Parity.type.label,
-                            color = Parity.colors.textSecondary,
-                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                        )
+            AnimatedVisibility(card == null && cameraGranted, enter = fadeIn(), exit = fadeOut()) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (summary == null) {
+                        GlassPanel(shape = CircleShape) {
+                            Text(
+                                "Point at a price tag",
+                                style = Parity.type.label,
+                                color = Parity.colors.textSecondary,
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(16.dp))
                     }
+                    ShutterButton(busy = capturing, onClick = home::capture)
                 }
             }
 
@@ -196,6 +204,7 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
                         onFxDetail = { fxDetail = c },
                         onCurrency = home::chooseCurrency,
                         onDeal = { editingDeal = c },
+                        labelLanguage = settings.labelLanguage,
                     )
                 }
             }
@@ -242,6 +251,43 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
     fxDetail?.let { c -> FxDetailDialog(c, onDismiss = { fxDetail = null }) }
 }
 
+/** The shutter: a photo of the tag when live scanning doesn't pick it up (design §6). */
+@Composable
+private fun ShutterButton(busy: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.size(58.dp).clip(CircleShape).border(3.dp, Color.White, CircleShape)
+            .clickable(enabled = !busy, onClick = onClick)
+            .semantics { contentDescription = "Take a photo of the price tag" }
+            .padding(6.dp),
+    ) {
+        Box(Modifier.fillMaxSize().clip(CircleShape).background(if (busy) Color.White.copy(alpha = 0.45f) else Color.White))
+    }
+}
+
+/** The cart, with a badge for the number of items in it; opens the cart list (design §7). */
+@Composable
+private fun CartButton(count: Int, onClick: () -> Unit) {
+    val c = Parity.colors
+    Box {
+        RoundIconButton(
+            Icons.Rounded.ShoppingCart,
+            if (count == 0) "Cart, empty" else "Cart, ${plural(count, "item")}",
+            onClick,
+            background = c.glass,
+        )
+        if (count > 0) {
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp)
+                    .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                    .clip(CircleShape).background(c.accent).padding(horizontal = 5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(if (count > 99) "99+" else "$count", style = Parity.type.caption, color = c.onAccent)
+            }
+        }
+    }
+}
+
 @Composable
 private fun TotalBar(summary: CartSummary?, settings: Settings, modifier: Modifier, onClick: () -> Unit) {
     val c = Parity.colors
@@ -266,14 +312,8 @@ private fun TotalBar(summary: CartSummary?, settings: Settings, modifier: Modifi
                 } else {
                     Spacer(Modifier.weight(1f))
                 }
-                // Item count as a small badge so the two totals keep the room.
-                Box(
-                    Modifier.clip(CircleShape).background(c.surfaceRaised).padding(horizontal = 8.dp, vertical = 2.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("${summary.count}", style = Parity.type.label, color = c.textPrimary)
-                }
-                Icon(Icons.Rounded.ExpandMore, contentDescription = "Open cart, ${summary.count} items", tint = c.textSecondary)
+                // The item count is on the cart button below.
+                Icon(Icons.Rounded.ExpandMore, contentDescription = "Open cart, ${plural(summary.count, "item")}", tint = c.textSecondary)
             }
         }
     }
@@ -290,6 +330,7 @@ private fun ResultCard(
     onFxDetail: () -> Unit,
     onCurrency: (CurrencyCode) -> Unit,
     onDeal: () -> Unit,
+    labelLanguage: String?,
 ) {
     val c = Parity.colors
     GlassPanel(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
@@ -299,7 +340,9 @@ private fun ResultCard(
                     val base = card.basePrice
                     if (base != null && card.baseCurrency != card.localCurrency) {
                         CountUpMoney(card.id, base, card.baseCurrency)
-                        Text("(${MoneyFormat.format(card.localPrice, card.localCurrency)})", style = Parity.type.priceSmall, color = c.textSecondary)
+                        // A deal-only tag's price is the deal's price per item.
+                        val each = if (card.multiBuy?.singlePriceShown == false) " each" else ""
+                        Text("(${MoneyFormat.format(card.localPrice, card.localCurrency)}$each)", style = Parity.type.priceSmall, color = c.textSecondary)
                     } else {
                         Text(MoneyFormat.format(card.localPrice, card.localCurrency), style = Parity.type.display, color = c.textPrimary)
                         if (card.baseCurrency != card.localCurrency) {
@@ -313,12 +356,16 @@ private fun ResultCard(
                 card.indicator?.let { FxBadge(it, onClick = onFxDetail) }
             }
             card.multiBuy?.let { deal ->
-                val each = deal.dealUnitPrice(card.localPrice)
-                val eachBase = card.rate?.localToBase(each)?.takeIf { card.baseCurrency != card.localCurrency }
-                Text(
-                    "Deal: ${deal.describe(card.localCurrency)}" + (eachBase?.let { " → ${MoneyFormat.format(it, card.baseCurrency)} each" } ?: ""),
-                    style = Parity.type.label, color = c.accent, modifier = Modifier.padding(top = 4.dp),
-                )
+                val text = if (deal.singlePriceShown) {
+                    val each = deal.dealUnitPrice(card.localPrice)
+                    val eachBase = card.rate?.localToBase(each)?.takeIf { card.baseCurrency != card.localCurrency }
+                    "Deal: ${deal.describe(card.localCurrency)}" + (eachBase?.let { " → ${MoneyFormat.format(it, card.baseCurrency)} each" } ?: "")
+                } else {
+                    val total = deal.total(deal.quantity, card.localPrice)
+                    val totalBase = card.rate?.localToBase(total)?.takeIf { card.baseCurrency != card.localCurrency }
+                    "Only the deal is on the tag: ${deal.describe(card.localCurrency)}" + (totalBase?.let { " → ${MoneyFormat.format(it, card.baseCurrency)}" } ?: "")
+                }
+                Text(text, style = Parity.type.label, color = c.accent, modifier = Modifier.padding(top = 4.dp))
             }
             if (card.rateStale && card.rate != null) {
                 Text("Rate from ${formatAge(card.rate.fetchedAtMs, now())} (offline)", style = Parity.type.caption, color = c.sale)
@@ -337,6 +384,7 @@ private fun ResultCard(
                     if (original != null && original != name) {
                         Text(original, style = Parity.type.caption, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    translationNote(card, labelLanguage)?.let { Text(it, style = Parity.type.caption, color = c.textSecondary) }
                 }
                 Icon(Icons.Rounded.Edit, contentDescription = "Edit name", tint = c.textSecondary, modifier = Modifier.padding(start = 8.dp))
             }
@@ -357,22 +405,42 @@ private fun ResultCard(
                 }
             }
 
-            card.printedCurrency?.let { printed ->
+            card.otherCurrency?.let { other ->
+                // The tag's own currency is used; the local one is a tap away if the symbol was misread.
                 Spacer(Modifier.height(12.dp))
-                Text("This tag shows ${Currencies[printed].name}. Which currency is it?", style = Parity.type.body, color = c.textPrimary)
+                Text("Priced in ${Currencies[card.localCurrency].name}", style = Parity.type.body, color = c.textPrimary)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip(printed.code, color = c.accent, selected = true, onClick = { onCurrency(printed) })
-                    Chip(card.localCurrency.code, onClick = { onCurrency(card.localCurrency) })
+                    Chip(card.localCurrency.code, color = c.accent, selected = true)
+                    Chip(other.code, onClick = { onCurrency(other) })
                 }
             }
 
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PillButton("Cancel", onCancel, Modifier.weight(1f), primary = false, height = 52.dp)
-                PillButton("Buy", onBuy, Modifier.weight(1f), enabled = card.printedCurrency == null)
+                PillButton("Buy", onBuy, Modifier.weight(1f))
             }
         }
+    }
+}
+
+/** Why the name isn't read or in the user's language yet. */
+private fun translationNote(card: ScanCard, labelLanguage: String?): String? {
+    if (card.readerMissing) {
+        val labels = labelLanguage?.let { Languages.find(it)?.englishName } ?: "these"
+        return "Reading $labels labels needs a connection once, to get the text reader"
+    }
+    val source = card.translationFrom ?: return null
+    val from = Languages.find(source)?.englishName ?: "this language"
+    val packExists = LabelReading.offlineSource(source, Languages.all.map { it.tag }.toSet()) != null
+    return when (card.translation) {
+        TranslationStatus.TRANSLATING -> "Translating…"
+        TranslationStatus.WAITING_FOR_NETWORK ->
+            "Will translate when you're online" + if (packExists) " · or download $from in Settings to translate offline" else ""
+        TranslationStatus.ONLINE_OFF ->
+            if (packExists) "Download $from in Settings, or turn on online translation" else "Turn on online translation in Settings to translate $from"
+        null -> null
     }
 }
 
