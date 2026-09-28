@@ -93,7 +93,7 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
       outline hugs the tag, the lock still is read straightened, "ფორთოხლის წვენი" (confidence 96) →
       "Orange juice", price crop "4.49" (96). 150 core tests.
 - [ ] Phone check of 0.3.0-beta.5: Georgian tags on the monitor and in a store (outline, names, speed)
-- [x] 0.3.0-beta.6 (LAN, from a phone report of a Thai "ราคา 88 บาท" sign named "A @s @a Ma ลห QR 0ป";
+- [x] 0.3.0-beta.6 (from a phone report of a Thai "ราคา 88 บาท" sign named "A @s @a Ma ลห QR 0ป";
       design §6.2, §14): that junk was Tesseract's (tha+eng), not ML Kit's. Names now need a real word
       (in a label's script, a word of it); "price" in ~40 languages, currency names and OCR near-misses
       of them ("ฐาคา") aren't names; ML Kit's line confidence gates its names like Tesseract's (so a
@@ -102,6 +102,7 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
       own digits. Verified on the emulator with the sign and with Mexico + a Georgian tag.
       Open: on that sign, when ML Kit misses the stylised 88 but reads "ราคา" as 5101, the shutter
       still shows ฿5,101 (Tesseract also reads it as 5101, and reads the 88 as Thai letters).
+- [ ] Phone check of 0.3.0-beta.6: the Thai sign on the monitor (฿88, no junk name)
 - [ ] M5 (after Phase 1): full analytics charts
 - [x] Release build: R8 keep rules for ML Kit + Tesseract, per-ABI APKs (arm64 release ≈ 59 MB); verified on emulator
 
