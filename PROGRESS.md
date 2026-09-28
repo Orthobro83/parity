@@ -77,6 +77,22 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
       banner tags (Whole milk Lala 1 L; Olive oil Carbonell 500 ml), and photo scans in 12 more scripts
       (all prices right; names in 11 of 12, not Burmese; Arabic-Indic digits don't read)
 - [ ] Phone check of 0.3.0-beta.4: Spanish store tags and speed on the phone
+- [x] 0.3.0-beta.5 (design §6.1, §6.2, §14, §20; branch `tag-crop-and-ocr-confidence`):
+      - Tag outlines: a pure-Kotlin finder (`core/.../scan/TagFinder.kt`, no OpenCV) on a ~480 px grey
+        copy of each live frame, still and photo; the parser picks the aimed tag by its text and reads
+        prices, names and banners only from it; Home outlines it, or shows centre corner marks.
+      - The script pass (Tesseract) reads only the lock still, the shutter's or a gallery photo, never
+        live frames; the tag is read straightened. Only the latest live frame is kept (was 12).
+      - Georgian model is tessdata_best (see "Decisions"); every Tesseract line carries its
+        confidence, and below 70 a reading is never a name. The price's own crop is read with a
+        digits/separators/currency-signs whitelist to confirm the digits.
+      - Names: deal and discount patterns count as advertising, unit lines ("წონა 1 კგ", "each")
+        aren't names, letter case never rules a line out, store phrases seen on 3 tags lose.
+      - Finalize moved from Home into the cart sheet (user request).
+      Verified on the emulator's live camera (a ShelfGen juice tag on the virtual poster, GEL): the
+      outline hugs the tag, the lock still is read straightened, "ფორთოხლის წვენი" (confidence 96) →
+      "Orange juice", price crop "4.49" (96). 150 core tests.
+- [ ] Phone check of 0.3.0-beta.5: Georgian tags on the monitor and in a store (outline, names, speed)
 - [ ] M5 (after Phase 1): full analytics charts
 - [x] Release build: R8 keep rules for ML Kit + Tesseract, per-ABI APKs (arm64 release ≈ 59 MB); verified on emulator
 
@@ -93,6 +109,24 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
 - Classifier tier 2 (on-device embeddings) is not built; the lexicon + user overrides cover Phase 1.
 - Every locked scan is recorded as an observation; repeats of the same product+price within
   10 minutes reuse the earlier one.
+- **Georgian Tesseract model: tessdata_best 4.1.0** (0.3.0-beta.5), not tessdata_fast or tessdata.
+  Measured with Homebrew Tesseract 5.5.3 on 176 rendered Georgian shelf lines (4 fonts, letters
+  10/14/20/28 px, blurred, noisy, JPEG), `kat+eng`, single-line mode:
+
+  | kat model | size | CER 10 px | CER 14 px | CER 20–28 px | all | time |
+  |---|---|---|---|---|---|---|
+  | tessdata_fast (before) | 2.5 MB | 56.9 % | 5.7 % | ≤0.3 % | 15.3 % | 42 ms/line |
+  | **tessdata_best** | 4.5 MB | 53.5 % | 4.7 % | ≤0.6 % | **14.3 %** | 50 ms/line |
+  | tessdata (legacy + integer LSTM) | 8.7 MB | 64.4 % | 8.2 % | ≤0.4 % | 17.8 % | 40 ms/line |
+
+  The app's Tesseract 5.5.1 (tesseract4android 4.9.0) loads the float model: "loaded kat+eng in
+  ~1 s (Tesseract 5.5.1)" on the emulator. Russian and English stay tessdata_fast (unchanged,
+  bundled); downloads stay tessdata_fast, pinned. Resolution matters more than the model: every
+  model reads 20 px letters almost perfectly and fails at 10 px, hence stills only.
+- **Name confidence threshold 70** (`NameText.MIN_CONFIDENCE`), from the same lines: it dropped 46
+  of 51 misread lines (CER > 10 %) and 3 of 125 good ones.
+- **No Jev (TypeSafe).** Considered for classifying tag lines; it's a hosted API that needs a paid
+  key and can't be bundled in the app, so name/promo/deal classification stays in-process.
 
 ## Install on a phone (Phase 1, sideloaded)
 
@@ -141,6 +175,12 @@ adb emu virtualscene-image wall /path/to/tag.png   # no path restores the defaul
 
 After the walk, the camera faces the poster. Swap images between scans, and show the default
 poster for a few seconds in between so the scanner resets.
+
+The emulator's camera takes real stills, but at 1280×960 (cropped to 660×1280), so a tag's name is
+only ~28 px tall on it: expect lower Tesseract confidence than on a phone. `ParityOcr` logs show
+each Tesseract line with its confidence ("ფორთოხლის წვენი (96)") and the tag outlines found
+("tags [Box(…)]"). Tag scenes for the poster: `java tools/ShelfGen.java <dir>`, then crop a
+landscape band around the rail (`sips -c 900 1080 --cropOffset 380 0 shelf_juice.png --out …`).
 
 ## Screenshots
 

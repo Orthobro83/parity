@@ -112,6 +112,7 @@ The shopping list gets its own tab. It is also visible from Home as a compact ov
 │ (🛒⁶)                              (🖼)  │  ← Cart button with item count · scan a photo
 │                                    (⌨)  │  ← Type a price
 │            CAMERA  PREVIEW               │
+│        ╭─────────────────────╮           │  ← Outline of the tag being read (§6.1)
 │      ┌──────────────────────────┐        │
 │      │  $3.71  (₾9.99)     ▲ 2.1%│       │  ← Result card anchored near detected tag
 │      │  Sour cream 20%           │       │  ← Translated name
@@ -121,15 +122,16 @@ The shopping list gets its own tab. It is also visible from Home as a compact ov
 │                  ( ◯ )                   │  ← Shutter (while no card is showing)
 │  List: ☐ coffee ☐ cheese ~~chicken~~ …   │  ← Collapsible shopping-list strip
 ├──────────────────────────────────────────┤
-│           [   Finalize (6)   ]           │  ← Visible once cart is non-empty
-├──────────────────────────────────────────┤
 │   🏠     📝     🕘     📈     ⚙️          │
 └──────────────────────────────────────────┘
 ```
 
-- The **cart button** (top left) shows how many items are in the cart and opens the cart list (§7).
+- The **cart button** (top left) shows how many items are in the cart and opens the cart list (§7),
+  which is where **Finalize** is (§11.1).
 - The **shutter**, a small white circle, takes a full-resolution photo of what's on screen when live
   scanning doesn't pick a tag up (§6.1).
+- A soft outline marks the tag being read; with none in view, faint corner marks at the centre
+  show where to aim.
 - There is no torch button: supermarkets are brightly lit.
 
 ### 4.2 Visual design
@@ -198,8 +200,8 @@ feed is the hero. Everything else floats above it on dark, softly blurred glass 
   total rolls to the new value digit by digit, like an odometer.
 - On the shopping list, the green strikethrough draws left to right (about 300 ms), then the row
   dims.
-- While scanning, detected text regions get a soft animated outline in `accent` that shows where the
-  app is reading.
+- While scanning, the tag being read gets a soft outline in `accent` that glides with it; with no
+  tag in view, faint white corner marks of a tag-shaped frame sit at the centre.
 - Swipe-to-remove reveals a `down`-tinted background with a trash icon.
 - All animations respect the system "Remove animations" accessibility setting.
 
@@ -236,10 +238,12 @@ precedence until the user clears it.
 CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
    │
    ├─► Barcode scanner ──────────────► barcode (optional)
+   ├─► Tag outlines (TagFinder) ─────► 0..N four-cornered outlines
    └─► Text recognizer ──► text blocks with bounding boxes + line heights
                               │
                               ▼
                     PriceTagParser
+                     ├─ the aimed tag (its outline, chosen by its text)
                      ├─ price candidates
                      ├─ product-name candidate
                      └─ sale signals
@@ -247,7 +251,10 @@ CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
                    stable across N=3 frames?  ──no──► keep scanning
                               │yes
                               ▼
-            convert ─► translate ─► FX indicator ─► show Result card
+            convert ─► FX indicator ─► show Result card
+                              │  labels ML Kit can't read (Georgian…):
+                              ▼
+            still on lock ─► Tesseract on the straightened tag ─► name, deal, sale ─► translate
 ```
 
 ### 6.1 Price extraction
@@ -259,6 +266,16 @@ CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
   `2026`); it isn't a figure inside a sentence; and when the frame has several lines of text, it
   stands out from them, as prices do on tags. Rulers, clocks, page numbers, years and numbers in
   running text no longer produce cards.
+- **Only the tag aimed at** (0.3.0-beta.5). Neighbouring tags sit side by side on a rail, and the
+  one next door can print a bigger price. Each frame, still and photo is searched for tag outlines:
+  closed, four-cornered shapes (paper against the shelf) on a small grey copy of the picture, in
+  pure Kotlin, so no image library is needed and iOS gets it too. A tag's bands (a sale banner, a
+  deal strip) are joined into one outline. The tag is chosen by its text: the best outline holding a
+  price, then the smallest outline in or around it holding that price and a name above it (where
+  names are), else a name, else any words. That's the tag rather than the rail or photo around it,
+  or a price panel on it. Prices, names and banners then come only from that tag (lines read across
+  two tags are cut at the edge). With no outline holding a price, the whole view is read as before:
+  a missed outline never blocks a scan.
 - **The shutter** is for tags that live scanning misses: it takes a full-resolution photo (scaled to
   at most 3,000 px) and reads it without the strictness, like a photo from the gallery. If no price
   is found, a message says so and suggests typing it in. Cards from the shutter, a photo or typing
@@ -301,7 +318,19 @@ CameraX frame (ImageAnalysis, ~3 fps, STRATEGY_KEEP_ONLY_LATEST)
   readable name the card asks the user to type one, rather than show junk.
 - **A sharper picture for small print.** Live frames show a tag's name only 15–25 px tall. When the
   live scan locks on a tag in such a script, the app takes a full-resolution still of the same view
-  and reads the name and wording from that, if it still shows the same price.
+  and reads the name and wording from that, if it still shows the same price. Only stills, the
+  shutter's photos and gallery photos are read by Tesseract (0.3.0-beta.5); without a still there's
+  no name rather than a guess from the live frame. Tesseract reads the tag's outline straightened.
+- **Only confident readings are names** (0.3.0-beta.5). Tesseract says how sure it is of each line
+  (0–100). Below 70 a reading is never a name: the card asks for it instead. See §14.
+- **What a name isn't.** Letter case never rules a line out: names are often printed in capitals
+  ("CHICKEN BREAST"). A line is left out for its words or its place: the marketing and sale
+  vocabulary, deal and discount wording ("1+1", "2x1", "3 for 2", "-20%", "50% off"), units alone
+  ("წონა 1 კგ", "each", "per kg"), a price per unit, or the price's own row. Of two close candidates
+  the one nearer the price wins, then the longer; capitals only decide against a line that also
+  looks like a banner (a marketing word, or two words alone atop the tag). Lines printed on three
+  tags with different prices in a session are the store's (a slogan, its name): they lose to any
+  other name on a tag but still name one that has nothing else.
 - **Translation source.** A name in the label's own script is in the label's language (language ID
   tells Russian from Ukrainian; for Chinese, Japanese and Korean the labels decide, since kanji-only
   Japanese reads as Chinese). Latin text on such a tag is kept as printed. For Latin-script labels
@@ -367,7 +396,8 @@ Matching is done in order of preference:
   - each row shows the name, `qty × unit price`, and the line total in base (local), with −/+ steppers;
   - **swipe right** removes a row, with a 5-second **Undo** snackbar;
   - collapse by tapping the bar again, swiping the sheet down, or pressing Back. The sheet has a drag
-    handle and snaps to peek, half, and full heights.
+    handle and snaps to peek, half, and full heights;
+  - **Finalize (n)** at the bottom saves the trip (§11.1).
 - Buying an item that matches a shopping-list entry crosses it off automatically (§8.3).
 
 ---
@@ -638,7 +668,8 @@ and this indicator therefore never need historical-rate API calls, and they stay
 ## 11. Finalize and history
 
 ### 11.1 Finalize
-- The **Finalize (n)** button appears once the cart has at least 1 line.
+- The **Finalize (n)** button is in the cart (§7), below the lines, once it has at least 1 line.
+  (Until 0.3.0-beta.5 it sat on Home.)
 - If there are unchecked shopping-list items, a dialog appears:
 
   > **Are you sure?**
@@ -772,13 +803,30 @@ label language has a reader. A test checks both for all 245 countries.
 - Mitigations for hard cases:
   - **Prices** are digits plus symbols, which the Latin model reads reliably in every country, so
     conversion always works.
-  - Tesseract first reads the area around the price with automatic page segmentation, which reads
-    banners and prices best. On a busy background (a tag photographed on a screen, glare) that can
-    find nothing at all, so sparse-text mode and then a larger scale are tried until words turn up. If
-    the tag's name still isn't found, a focused read of the area above the price follows.
-  - The area takes in whole lines of text around the price (names often start well left of it).
-    Images are scaled so letters are about 36 px tall (0.5–3×), and the contrast is stretched so the
+  - Tesseract reads the tag's outline (§6.1), straightened, with a thin margin: the shelf a wider
+    margin takes in throws off its layout and contrast. Without an outline it reads the area around
+    the price, taking in whole lines of text there (names often start well left of it).
+  - It reads with automatic page segmentation first, which reads banners and prices best, then the
+    tag as one block of lines (automatic layout misread names on straightened tags), sparse text,
+    and a larger scale. The first attempt that reads the label's script with a mean confidence of
+    80 or more is taken; otherwise the most confident one. If the tag's name still isn't found, a
+    focused read of the name area follows.
+  - Images are scaled so letters are about 36 px tall (0.5–3×), and the contrast is stretched so the
     ink is black and the tag white.
+  - **Confidence.** Each line Tesseract reads carries its confidence (0–100). A line below 70 is
+    never a name. On rendered Georgian shelf text 10–28 px tall, blurred and noisy, 70 dropped 46
+    of 51 misreadings and 3 of 125 good readings; 65 kept twice the misreadings, 75 lost twice the
+    good ones.
+  - **The price's own crop** is read once more with only digits, separators, currency signs and the
+    letters of the local currency's code, USD and EUR allowed, so a letter can't turn into a digit
+    there. It confirms the fast recognizer's digits; a confident different reading is offered as
+    an alternative on the card, never taken over it. Names, wording and whole photos (Burmese or
+    Arabic-Indic digits) are read without that list.
+  - **Models.** Georgian ships as tessdata_best 4.1.0 (float LSTM, 4.5 MB) since 0.3.0-beta.5; Russian
+    and English ship, and every other script downloads, as tessdata_fast 4.1.0. Shipped models are
+    pinned by SHA-256 like downloads and are replaced when an update ships a new version. On the
+    rendered Georgian lines, best misread 14.3 % of characters, fast 15.3 % and tessdata (legacy +
+    integer LSTM, 8.7 MB) 17.8 %, best taking about 20 % longer than fast.
   - Deal, sale and unit words that Tesseract gets a letter wrong in ("შეიძინეტ" for "შეიძინეთ")
     still count, and deal wording is left out of names.
   - If OCR confidence is low, the card shows "Name not recognized — tap to type or photograph." A
@@ -918,3 +966,8 @@ Where the Phase 1 build differs from the sections above, and why. PROGRESS.md tr
 | Names (§6.2) | Most name-like line | Advertising (banners, slogans) excluded; lines with quantities preferred | A store test took "Super Discount" and "Celebra tus ahorros" for names |
 | Printed currency (§6.1) | Ask which currency applies | Convert from the printed currency; local one tap away | Asking first showed a wrong conversion (¥2,150 as €2,150) |
 | Georgian names (§6.2, §14) | Read from the camera frame | From a full-resolution still taken on lock; Tesseract input scaled by text size and contrast-stretched; reading area widened to whole lines | On a phone, live frames gave partial names ("ილოგრა (", "It's.") |
+| Neighbouring tags (§6.1) | — | 0.3.0-beta.5: tag outlines found in pure Kotlin (no OpenCV); the aimed tag chosen by its text; prices, names and banners only from it; Tesseract reads it straightened | A neighbour's bigger price or name could win; OpenCV would add ~10 MB of native code per CPU type |
+| Script pass (§6.2) | Still if possible | Only stills and photos, never live frames; live analysis pauses while a still is taken | A still that timed out fell back to a coarse live frame |
+| Name confidence (§14) | "If OCR confidence is low…" | Per-line Tesseract confidence; below 70 no name | Fragments and misreadings reached the product |
+| Georgian model (§14) | tessdata_fast | tessdata_best (+2 MB) | Fewer misreadings of small print |
+| Finalize (§4.1, §11.1) | On Home | In the cart sheet | User request, 2026-09-28 |

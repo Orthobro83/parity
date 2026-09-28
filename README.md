@@ -23,8 +23,9 @@ time.
 ### Scan, convert, understand
 - **Scan price tags** with the camera. The price locks in once it reads the same in several frames,
   and only numbers written like shelf prices count, so a page of text or a clock won't pop up a
-  card. If a tag doesn't lock in, tap the white shutter to take a photo of it. You can also scan a
-  photo from your gallery, or type a price in.
+  card. Parity outlines the tag it's reading and reads only that one, so the next tag's price or
+  name never ends up on your card. If a tag doesn't lock in, tap the white shutter to take a photo
+  of it. You can also scan a photo from your gallery, or type a price in.
 - **Your currency first:** the converted price is shown large, with the shelf price in brackets:
   **$3.84 (₾9.99)**. Over 150 fiat currencies plus 19 cryptocurrencies (BTC, ZEC, ETH, XMR and
   more).
@@ -61,8 +62,8 @@ six providers, from daily (free, no key) to minute-level (CoinGecko).
 - **Cart:** the cart button shows how many items you have. Open it to see both totals and the
   exchange rate in plain words ("1 USD = 2.60 GEL"), adjust quantities, or swipe an item right to
   remove it (with Undo).
-- **Finalize** saves the trip. If items on your shopping list are still unbought, Parity lists
-  them and asks: *Keep Shopping* or *Finalize purchases*.
+- **Finalize** in the cart saves the trip. If items on your shopping list are still unbought,
+  Parity lists them and asks: *Keep Shopping* or *Finalize purchases*.
 
 ### Plan
 - **Shopping list:** type naturally ("chicken, ground beef, coffee, creamer, chocolate, yogurt, and
