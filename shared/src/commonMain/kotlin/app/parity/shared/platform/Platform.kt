@@ -55,7 +55,7 @@ interface CameraScanner {
      * Re-reads [region] of frame [frameId] with a script-specific OCR engine (Tesseract), for names
      * in scripts the fast recognizer can't read, such as Georgian. [languages] are Tesseract codes,
      * e.g. "kat+eng". [textHeight] is the expected height of the letters in frame pixels, if known.
-     * Returns null when that frame is no longer kept.
+     * Only stills and photos are read (design §6.2): null for a live frame, or one no longer kept.
      */
     suspend fun readRegion(frameId: Long, region: Box, languages: String, textHeight: Float? = null): String?
 
@@ -71,9 +71,10 @@ interface CameraScanner {
 
     /**
      * The shutter: takes a full-resolution photo of what the preview shows and reads it like
-     * [scanImage]. Null when the camera isn't running or the photo fails.
+     * [scanImage]. Null when the camera isn't running or the photo fails. Where the camera can't
+     * take stills it reads the latest preview frame instead, unless [stillOnly].
      */
-    suspend fun capture(): OcrFrame?
+    suspend fun capture(stillOnly: Boolean = false): OcrFrame?
 }
 
 interface TextServices {

@@ -219,6 +219,16 @@ class NeighbouringTagTest {
     }
 
     @Test
+    fun withTheNameMissedTheTagIsTheOutlineWithWords() {
+        // On a still of a Georgian tag the fast recognizer missed the name; what it made of the
+        // price per litre is on the tag, not on the shelf around it.
+        val shelf = rect(0, 200, 1000, 800)
+        val tag = parse(listOf(l("\$2.49", 100, 380, 380, 480), l("1 o-ou aun: 4.49e", 60, 490, 400, 505)), listOf(shelf, milkTag))
+        assertEquals(milkTag, tag.tagQuad)
+        assertEquals("2.49", tag.price!!.amount.toPlain())
+    }
+
+    @Test
     fun aPricePanelGivesWayToTheTagAroundIt() {
         val panel = rect(90, 370, 390, 490)
         val tag = parse(milk + bread, listOf(panel, milkTag))

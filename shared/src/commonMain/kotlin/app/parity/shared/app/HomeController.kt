@@ -259,20 +259,21 @@ class HomeController(private val graph: AppGraph) {
         knownName: String? = null,
     ) = coroutineScope {
         // For scripts the fast recognizer can't read, the name and wording are read by Tesseract
-        // (its model downloaded if needed) from a full-resolution still of the tag: live frames show
-        // that small print only 15–25 px tall.
+        // (its model downloaded if needed) only from a full-resolution picture: on a live lock, a
+        // still taken then (design §6.2). Live frames show that small print only 15–25 px tall, so
+        // with no still there's no name rather than a guess at one.
         val needsReader = knownName == null && tag.frameId != 0L && !fastReadsLabels(settings)
         val reader = async {
             if (!needsReader) return@async null
             readerFor(settings).also { if (it == null) update(cardId) { card -> card.copy(readerMissing = true) } }
         }
-        val source = async { if (live && needsReader) stillOf(tag, settings) ?: tag else tag }
+        val source = async { if (live && needsReader) stillOf(tag, settings) else tag }
         // Read the name (and, for those scripts, the tag's wording) while the rate is fetched,
         // showing each as soon as it's ready.
         val refined = async {
             if (knownName != null) return@async null
             val tesseract = reader.await() ?: return@async null
-            refineWithScriptOcr(source.await(), settings, tesseract)?.also { better ->
+            refineWithScriptOcr(source.await() ?: return@async null, settings, tesseract)?.also { better ->
                 if (better.differsFrom(tag)) update(cardId) { card ->
                     // Keep a price the shopper picked by hand; otherwise take the better reading.
                     val priceUntouched = card.localPrice.compareTo(tag.price?.amount ?: card.localPrice) == 0
@@ -289,7 +290,7 @@ class HomeController(private val graph: AppGraph) {
             }
         }
         val name = async {
-            (knownName ?: resolveName(source.await(), refined.await(), settings, reader.await())).also { originalName ->
+            (knownName ?: source.await()?.let { resolveName(it, refined.await(), settings, reader.await()) }).also { originalName ->
                 update(cardId) {
                     it.copy(
                         originalName = originalName,
@@ -403,7 +404,8 @@ class HomeController(private val graph: AppGraph) {
      */
     private suspend fun stillOf(tag: ParsedTag, settings: Settings): ParsedTag? {
         val price = tag.price ?: return null
-        val frame = withTimeoutOrNull(5_000) { runCatching { graph.platform.camera.capture() }.getOrNull() } ?: return null
+        // The card already shows the price, so there's time: a budget phone takes a few seconds.
+        val frame = withTimeoutOrNull(10_000) { runCatching { graph.platform.camera.capture(stillOnly = true) }.getOrNull() } ?: return null
         val still = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency) }
         return still.takeIf { it.price?.amount?.compareTo(price.amount) == 0 }
     }

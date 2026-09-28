@@ -104,36 +104,37 @@ object PriceTagParser {
     }
 
     /**
-     * The outline of the tag aimed at (design §6.1), and whether it holds a name besides the price.
-     * It's the finder's best outline that holds a price. The smallest one inside it holding that
-     * price and a name, above the price where names are if one does, is the tag itself, the first
-     * being the rail or photo around it; and an outline with nothing but the price is a panel on a
-     * tag, which gives way to the tag around it. Null when no outline holds a price, as when none
-     * was found: then the whole view is read.
+     * The outline of the tag aimed at (design §6.1), and whether it holds text besides the price.
+     * The finder's best outline holding a price may be the rail or photo around the tag, or a panel
+     * on it holding nothing but the price; so of it, the outlines inside it and those around it with
+     * that price, the smallest with a name above the price (where names are) is the tag; failing
+     * that, with a name anywhere, or any words: the fast recognizer can miss a line it can't read.
+     * Null when no outline holds a price, as when none was found: then the whole view is read.
      */
     private fun aimedTag(frame: OcrFrame, candidates: List<PriceCandidate>, localDecimals: Int): Pair<TagQuad, Boolean>? {
         val prices = candidates.filter { looksLikePrice(it, localDecimals) }
         fun held(q: TagQuad) = prices.filter { q.holds(it.box) }
-        fun hasName(q: TagQuad, aboveOnly: Boolean): Boolean {
-            val onIt = held(q)
-            val top = onIt.minOfOrNull { it.box.top } ?: return false
-            return frame.lines.mapNotNull { it.within(q.reach()) }.any { line ->
-                q.holds(line.box) && NameFinder.isNameLike(line, null) && onIt.none { sameRow(it.box, line.box) } &&
-                    (!aboveOnly || line.box.centerY < top)
+        val first = frame.tagQuads.firstOrNull { held(it).isNotEmpty() } ?: return null
+        val price = held(first)
+        // The biggest number is the price (a unit price under it is words on the tag).
+        val main = price.maxBy { it.box.height }
+        /** Lines on [q] besides the price's row that are a name above it (0), a name (1), or words (2). */
+        fun has(q: TagQuad, tier: Int): Boolean = frame.lines.mapNotNull { it.within(q.reach()) }.any { line ->
+            q.holds(line.box) && !sameRow(main.box, line.box) && when (tier) {
+                0 -> NameFinder.isNameLike(line, null) && line.box.centerY < main.box.top
+                1 -> NameFinder.isNameLike(line, null)
+                else -> line.text.count { it.isLetter() } >= 2
             }
         }
         fun inside(inner: TagQuad, outer: TagQuad) = inner.area < outer.area * 0.8f && outer.contains(inner.bounds.centerX, inner.bounds.centerY)
-        val first = frame.tagQuads.firstOrNull { held(it).isNotEmpty() } ?: return null
-        val price = held(first)
-        fun sameTag(q: TagQuad, aboveOnly: Boolean) = held(q).any { it in price } && hasName(q, aboveOnly)
-        if (hasName(first, aboveOnly = false)) {
-            val inner = frame.tagQuads.filter { inside(it, first) }
-            val tag = inner.filter { sameTag(it, aboveOnly = true) }.minByOrNull { it.area }
-                ?: inner.filter { sameTag(it, aboveOnly = false) }.minByOrNull { it.area }
-            return (tag ?: first) to true
+        fun samePrice(q: TagQuad) = held(q).any { it in price }
+        val within = listOf(first) + frame.tagQuads.filter { inside(it, first) && samePrice(it) }
+        val around = frame.tagQuads.filter { inside(first, it) && samePrice(it) }
+        for (tier in 0..2) {
+            (within.filter { has(it, tier) }.minByOrNull { it.area } ?: around.filter { has(it, tier) }.minByOrNull { it.area })
+                ?.let { return it to true }
         }
-        val around = frame.tagQuads.filter { inside(first, it) && sameTag(it, aboveOnly = false) }.minByOrNull { it.area }
-        return if (around != null) around to true else first to false
+        return first to false
     }
 
     /**

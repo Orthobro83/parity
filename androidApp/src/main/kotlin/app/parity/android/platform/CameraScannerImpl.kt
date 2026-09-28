@@ -111,15 +111,22 @@ class CameraScannerImpl(
     }
     private val executor = Executors.newSingleThreadExecutor()
 
-    /** Recent camera frames and scanned photos by frame id, so a region is re-read from the right image. */
-    private val frames = object : LinkedHashMap<Long, Pair<Bitmap, Int>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Pair<Bitmap, Int>>?) = size > 12
+    /**
+     * The latest camera frame, for the shutter where stills can't be taken, and recent stills and
+     * photos by frame id, which Tesseract re-reads. Live frames show small print too coarsely for
+     * it (design §6.2), so they aren't kept for that.
+     */
+    private val frames = object : LinkedHashMap<Long, Pair<Bitmap, Int>>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Pair<Bitmap, Int>>?) = size > 1
     }
     private val photos = object : LinkedHashMap<Long, Bitmap>(4, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Bitmap>?) = size > 2
     }
     private val nextFrameId = AtomicLong(1)
     @Volatile private var imageCapture: ImageCapture? = null
+
+    /** A still is being taken and read: live frames wait, so they don't hold up its delivery and OCR. */
+    @Volatile private var stillBusy = false
 
     @Composable
     override fun Preview(
@@ -218,7 +225,7 @@ class CameraScannerImpl(
         override fun analyze(image: ImageProxy) {
             val now = SystemClock.elapsedRealtime()
             val minInterval = if (mode == ScanMode.QR_ONLY) 60L else 250L
-            if (!active.value || now - lastRun < minInterval) {
+            if (!active.value || stillBusy || now - lastRun < minInterval) {
                 image.close()
                 return
             }
@@ -313,14 +320,8 @@ class CameraScannerImpl(
         future.addListener({ runCatching { future.get() }.onSuccess(cont::resume).onFailure(cont::resumeWithException) }, ContextCompat.getMainExecutor(context))
     }
 
-    /** Frame or photo [frameId], upright. */
-    private fun uprightImage(frameId: Long): Bitmap? {
-        val photo = synchronized(photos) { photos[frameId] }
-        val (frame, rotation) = photo?.let { it to 0 } ?: synchronized(frames) { frames[frameId] } ?: return null
-        return if (rotation == 0) frame else {
-            Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
-        }
-    }
+    /** Still or photo [frameId] (kept upright), or null for a live frame. */
+    private fun uprightImage(frameId: Long): Bitmap? = synchronized(photos) { photos[frameId] }
 
     /** The upright crop of [region] from frame [frameId], and its offset in the frame. */
     private fun crop(frameId: Long, region: Box): Triple<Bitmap, Int, Int>? {
@@ -360,8 +361,17 @@ class CameraScannerImpl(
         readPhoto(upright(decoded, bytes))
     }
 
-    override suspend fun capture(): OcrFrame? {
-        val still = imageCapture ?: return latestFrame()
+    override suspend fun capture(stillOnly: Boolean): OcrFrame? {
+        val still = imageCapture ?: return if (stillOnly) null else latestFrame()
+        stillBusy = true
+        try {
+            return takeStill(still)
+        } finally {
+            stillBusy = false
+        }
+    }
+
+    private suspend fun takeStill(still: ImageCapture): OcrFrame? {
         val image = suspendCancellableCoroutine<ImageProxy?> { cont ->
             still.takePicture(
                 executor,
@@ -420,9 +430,10 @@ class CameraScannerImpl(
         synchronized(photos) { photos[frameId] = bitmap }
         val input = InputImage.fromBitmap(bitmap, 0)
         val textTask = textRecognizer.process(input)
+        val barcodeTask = tagBarcodes.process(input)
         val quads = runCatching { TagOutlines.find(bitmap) }.getOrDefault(emptyList())
         val text = runCatching { textTask.awaitResult() }.getOrNull()
-        val barcodes = runCatching { tagBarcodes.process(input).awaitResult() }.getOrNull().orEmpty()
+        val barcodes = runCatching { barcodeTask.awaitResult() }.getOrNull().orEmpty()
         val lines = text?.textBlocks.orEmpty().flatMap { block ->
             block.lines.mapNotNull { line ->
                 val box = line.boundingBox ?: return@mapNotNull null
