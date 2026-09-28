@@ -13,6 +13,10 @@ object PromoDetector {
     /** Chinese discounts are written as the share paid: "8折" is 20 % off. */
     private val chineseDiscount = Regex("(?<![\\d.])[1-9](?:\\.\\d)?\\s?折")
 
+    /** A discount on a line: "-20%", "20% off", "8折" (not a fat content such as "20%"). */
+    fun hasDiscount(text: String): Boolean =
+        discountPercent.containsMatchIn(text) || percentOff.containsMatchIn(text.lowercase()) || chineseDiscount.containsMatchIn(text)
+
     /** [skipLines] are lines that belong to a multi-buy deal, whose wording isn't a price cut. */
     fun detect(lines: List<OcrLine>, skipLines: Set<Int> = emptySet()): PromoResult {
         val signals = linkedSetOf<String>()

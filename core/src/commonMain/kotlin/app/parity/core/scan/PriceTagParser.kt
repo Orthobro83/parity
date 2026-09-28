@@ -61,9 +61,9 @@ object PriceTagParser {
     /**
      * With [strict] (continuous scanning), only a number written like a shelf price makes a tag,
      * so aiming at a page, a screen or a clock shows nothing; photos and forced captures aren't
-     * strict ([looksLikeShelfPrice]).
+     * strict ([looksLikeShelfPrice]). [storePhrases] are lines seen on tag after tag ([StorePhrases]).
      */
-    fun parse(ocr: OcrFrame, local: CurrencyCode?, strict: Boolean = false): ParsedTag {
+    fun parse(ocr: OcrFrame, local: CurrencyCode?, strict: Boolean = false, storePhrases: Set<String> = emptySet()): ParsedTag {
         val whole = ocr.withAsciiDigits()
         val localDecimals = local?.let { Currencies[it].decimals } ?: 2
         val everywhere = candidatesIn(whole, local, localDecimals)
@@ -84,7 +84,7 @@ object PriceTagParser {
         if (strict && decided.price?.let { looksLikeShelfPrice(it, frame, localDecimals) } != true) {
             return ParsedTag.EMPTY.copy(barcode = barcode, frameId = frame.id)
         }
-        val name = NameFinder.find(frame, decided.price, exclude = dealLines)
+        val name = NameFinder.find(frame, decided.price, exclude = dealLines, storePhrases = storePhrases)
         return decided.copy(
             name = name?.first,
             nameBox = name?.second,
@@ -194,6 +194,7 @@ object PriceTagParser {
         local: CurrencyCode? = null,
         language: String? = null,
         priceLines: List<OcrLine> = emptyList(),
+        storePhrases: Set<String> = emptySet(),
     ): ParsedTag {
         val textLines = scriptLines.map { it.withAsciiDigits() }
         val unnamed = tag.copy(name = null, nameBox = null)
@@ -211,12 +212,12 @@ object PriceTagParser {
             if (perUnit) c.copy(isPerUnit = true, score = c.score - 0.45) else c
         }.sortedByDescending { it.score }
         if (remarked.none { it.score >= MIN_SCORE }) {
-            val name = NameFinder.find(textFrame, tag.price, script = script)
+            val name = NameFinder.find(textFrame, tag.price, script = script, storePhrases = storePhrases)
             return unnamed.copy(name = name?.first, nameBox = name?.second)
         }
         val (decided, dealLines) = decide(remarked, textLines, localDecimals)
         // The name as the script-aware OCR reads it, skipping deal and promotion wording.
-        val name = NameFinder.find(textFrame, decided.price, exclude = dealLines, script = script)
+        val name = NameFinder.find(textFrame, decided.price, exclude = dealLines, script = script, storePhrases = storePhrases)
         return tag.copy(
             price = decided.price,
             alternatives = withCropReading(decided, tag.price, priceLines, localDecimals),

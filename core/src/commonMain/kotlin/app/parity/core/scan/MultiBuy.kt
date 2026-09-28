@@ -219,8 +219,10 @@ internal object MultiBuyDetector {
         c.currency != null || c.decimals > 0 || localDecimals == 0
 
     /** True when a lower-cased line has deal wording ("buy 3", "1+1"); a pack size ("10 ცალი") isn't. */
-    fun mentionsDeal(lower: String): Boolean =
-        fixedOffer(lower) != null || explicitQuantity.any { it.containsMatchIn(lower) } || plusQuantity.containsMatchIn(lower)
+    fun mentionsDeal(lower: String): Boolean = isDealWording(lower) || plusQuantity.containsMatchIn(lower)
+
+    /** Deal wording that can't be an age rating, as a bare "3+" can: "1+1", "2x1", "buy 3", "3 for $10". */
+    fun isDealWording(lower: String): Boolean = fixedOffer(lower) != null || explicitQuantity.any { it.containsMatchIn(lower) }
 
     private fun fixedOffer(lower: String): MultiBuyOffer? {
         plusFree.find(lower)?.let { m ->

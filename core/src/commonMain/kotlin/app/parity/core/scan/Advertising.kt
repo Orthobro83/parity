@@ -39,7 +39,18 @@ internal object Advertising {
         promocja promocje obnizka cena niska taniej oszczedzaj nowosc
         indirim kampanya firsat fiyat ucuz yeni bedava sadece bugun
         акция скидка скидки выгода выгодно суперцена низкая распродажа спецпредложение супер новинка только сегодня хит экономия экономь
-        აქცია ფასდაკლება შეთავაზება სპეციალური ფასი დაზოგე ახალი სუპერ
+        цена цены купи купите бонус
+        აქცია აქციით ფასდაკლება ფასდაკლებით შეთავაზება სპეცშეთავაზება სპეციალური ფასი ფასები დაზოგე ახალი სუპერ შეიძინეთ შეიძინე
+        იყიდეთ იყიდე ყიდვისას შეძენისას ახლა მხოლოდ უფასოდ უფასო საუკეთესო დაბალი ყოველდღე ყოველდღიური
+        was
+    """.trimIndent().split(Regex("\\s+")).filter { it.isNotEmpty() }.map(::plain).toSet()
+
+    /** What a product is sold by rather than what it is: units, weights and "each". */
+    private val units: Set<String> = """
+        kg g gr grs mg lb lbs oz l lt ltr ml cl dl ea each per pc pcs piece pieces unit units weight net wt
+        peso neto unidad unidades pieza piezas kilo kilos litro litros gramos poids piece stuck stk gewicht
+        вес нетто кг г гр л мл шт штук упак
+        წონა წონით ცალი ცალ კგ გ გრ ლ მლ ლიტრი კილოგრამი გრამი
     """.trimIndent().split(Regex("\\s+")).filter { it.isNotEmpty() }.map(::plain).toSet()
 
     /** Little words that are neither: "tus" in "Celebra tus ahorros", "de" in "Leche de vaca". */
@@ -59,16 +70,28 @@ internal object Advertising {
         RegexOption.IGNORE_CASE,
     )
 
-    /** Share of [text]'s words that are marketing words, 0–1. */
+    /**
+     * Share of [text]'s words that are marketing words, 0–1. Deal and discount wording ("1+1",
+     * "2x1", "3 for 2", "-20%", "50% off") counts as one such word, whatever its letter case.
+     */
     fun share(text: String): Double {
-        val words = Lexicon.canonicalized(text).lowercase().split(Regex("[^\\p{L}]+"))
-            .map(::plain).filter { it.length >= 2 && it !in filler }
-        if (words.isEmpty()) return 0.0
-        return words.count { it in marketing || it in Lexicon.promoWords || it in Lexicon.boilerplate }.toDouble() / words.size
+        val canonical = Lexicon.canonicalized(Digits.normalize(text))
+        val lower = canonical.lowercase()
+        val offers = if (MultiBuyDetector.isDealWording(" $lower ") || PromoDetector.hasDiscount(canonical)) 1 else 0
+        val words = lower.split(Regex("[^\\p{L}]+")).map(::plain).filter { it.length >= 2 && it !in filler }
+        if (words.isEmpty() && offers == 0) return 0.0
+        val selling = words.count { it in marketing || it in Lexicon.promoWords || it in Lexicon.boilerplate }
+        return (selling + offers).toDouble() / (words.size + offers)
     }
 
     fun hasQuantity(text: String): Boolean = quantity.containsMatchIn(Digits.normalize(text))
 
     /** Mostly marketing and no quantity: a banner or a slogan, not a product's name. */
     fun isAdvertising(text: String): Boolean = share(text) > 0.5 && !hasQuantity(text)
+
+    /** Nothing but units, weights and prices ("წონა 1 კგ", "each", "per kg"): not a name. */
+    fun isUnitsOnly(text: String): Boolean {
+        val words = Lexicon.canonicalized(text).lowercase().split(Regex("[^\\p{L}]+")).map(::plain).filter { it.isNotEmpty() && it !in filler }
+        return words.isNotEmpty() && words.all { it in units || it in Lexicon.boilerplate }
+    }
 }

@@ -19,6 +19,7 @@ import app.parity.core.scan.ParsedTag
 import app.parity.core.scan.PriceCandidate
 import app.parity.core.scan.PriceStabilizer
 import app.parity.core.scan.PriceTagParser
+import app.parity.core.scan.StorePhrases
 import app.parity.core.scan.TagQuad
 import app.parity.core.scan.TextScript
 import app.parity.core.transfer.QrTransfer
@@ -115,6 +116,8 @@ class HomeController(private val graph: AppGraph) {
     private val scope = graph.scope
     private val frames = MutableSharedFlow<OcrFrame>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val stabilizer = PriceStabilizer(requiredFrames = 3)
+    /** The store's own slogans and name, learnt from tag after tag this session (design §6.2). */
+    private val storePhrases = StorePhrases()
     private var emptyFrames = 0
     private var cardCounter = 0L
     private var enrichJob: Job? = null
@@ -199,7 +202,7 @@ class HomeController(private val graph: AppGraph) {
         }
         val settings = graph.settings.value ?: return
         // Strict: only numbers written like shelf prices, so random text in view makes no card.
-        val tag = PriceTagParser.parse(frame, settings.localCurrency, strict = true)
+        val tag = PriceTagParser.parse(frame, settings.localCurrency, strict = true, storePhrases = storePhrases.known)
         _aim.value = tag.tagQuad?.let { Aim(it, frame.width, frame.height) }
         if (tag.price == null) {
             // Nothing price-like for a while: forget the last tag so re-scanning it shows the card again.
@@ -238,7 +241,15 @@ class HomeController(private val graph: AppGraph) {
         )
         _card.value = card
         graph.platform.haptics.tick()
+        remember(tag, tag.lines)
         enrichJob = scope.launch { enrich(card.id, tag, settings, currency, live) }
+    }
+
+    /** Notes the lines of a tag read within its outline, where they're its own (design §6.2). */
+    private fun remember(tag: ParsedTag, lines: List<OcrLine>) {
+        val price = tag.price ?: return
+        if (tag.tagQuad == null) return
+        storePhrases.record(price.amount.toStringExpanded() + (price.currency?.code ?: ""), lines)
     }
 
     private fun update(cardId: Long, transform: (ScanCard) -> ScanCard) {
@@ -352,6 +363,7 @@ class HomeController(private val graph: AppGraph) {
                 graph.platform.camera.readLines(tag.frameId, area, tesseract, textHeight = p.height * 0.5f, quad = tag.tagQuad?.padded())
             }.getOrNull()
         } ?: return null
+        remember(tag, lines)
         // The price's own crop with digits, separators and currency signs only, to confirm its digits.
         val priceLines = withTimeoutOrNull(4_000) {
             runCatching {
@@ -359,7 +371,7 @@ class HomeController(private val graph: AppGraph) {
             }.getOrNull()
         }.orEmpty()
         return withContext(Dispatchers.Default) {
-            PriceTagParser.refine(tag, lines, settings.localCurrency, settings.labelLanguage, priceLines)
+            PriceTagParser.refine(tag, lines, settings.localCurrency, settings.labelLanguage, priceLines, storePhrases.known)
         }
     }
 
@@ -414,7 +426,7 @@ class HomeController(private val graph: AppGraph) {
         val price = tag.price ?: return null
         // The card already shows the price, so there's time: a budget phone takes a few seconds.
         val frame = withTimeoutOrNull(10_000) { runCatching { graph.platform.camera.capture(stillOnly = true) }.getOrNull() } ?: return null
-        val still = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency) }
+        val still = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency, storePhrases = storePhrases.known) }
         return still.takeIf { it.price?.amount?.compareTo(price.amount) == 0 }
     }
 
@@ -671,7 +683,7 @@ class HomeController(private val graph: AppGraph) {
      * see (Persian ۱۲۰, Burmese ၁၀၀): if it finds no price, Tesseract reads the whole photo.
      */
     private suspend fun parsePhoto(frame: OcrFrame, settings: Settings): ParsedTag {
-        val tag = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency) }
+        val tag = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency, storePhrases = storePhrases.known) }
         if (tag.price != null || fastReadsLabels(settings)) return tag
         val reader = readerFor(settings) ?: return tag
         val whole = Box(0f, 0f, frame.width.toFloat(), frame.height.toFloat())
@@ -679,7 +691,7 @@ class HomeController(private val graph: AppGraph) {
             runCatching { graph.platform.camera.readLines(frame.id, whole, reader, textHeight = frame.height / 40f) }.getOrNull()
         } ?: return tag
         return withContext(Dispatchers.Default) {
-            PriceTagParser.parse(OcrFrame(lines, frame.width, frame.height, frame.barcodes, frame.id), settings.localCurrency)
+            PriceTagParser.parse(OcrFrame(lines, frame.width, frame.height, frame.barcodes, frame.id), settings.localCurrency, storePhrases = storePhrases.known)
         }
     }
 
