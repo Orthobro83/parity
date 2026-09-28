@@ -5,6 +5,7 @@ import app.parity.core.money.decimal
 import app.parity.core.money.toPlain
 import app.parity.core.scan.AmountParser
 import app.parity.core.scan.Box
+import app.parity.core.scan.Digits
 import app.parity.core.scan.NameText
 import app.parity.core.scan.Names
 import app.parity.core.scan.OcrElement
@@ -13,6 +14,7 @@ import app.parity.core.scan.OcrLine
 import app.parity.core.scan.PriceStabilizer
 import app.parity.core.scan.PriceTagParser
 import app.parity.core.scan.PromoDetector
+import app.parity.core.scan.TagQuad
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -195,6 +197,62 @@ class StabilizerAndNamesTest {
     @Test
     fun decimalsHelper() {
         assertEquals("2.5", decimal("2.50").toPlain())
+    }
+}
+
+/** A number the fast recognizer made out of a letter is dropped when the script pass doesn't see it (design §7.1). */
+class PhantomDigitTest {
+    @Test
+    fun aLetterReadAsADigitIsDropped() {
+        // "ცალი" (pieces) with its first letter read as a 6, beside the real price.
+        val first = PriceTagParser.parse(frame(line("6 aomo", 100, 100, 300, 160), line("4.49", 150, 200, 450, 320)), CurrencyCode.GEL)
+        assertTrue(first.candidates.any { it.amount.toPlain() == "6" })
+        val refined = PriceTagParser.refine(first, listOf(line("ცალი", 100, 100, 300, 160), line("4.49", 150, 200, 450, 320)), CurrencyCode.GEL, "ka")
+        assertTrue(refined.candidates.none { it.amount.toPlain() == "6" })
+        assertTrue(refined.alternatives.none { it.amount.toPlain() == "6" })
+        assertEquals("4.49", refined.price!!.amount.toPlain())
+    }
+
+    @Test
+    fun aNumberTheScriptPassSeesStays() {
+        val first = PriceTagParser.parse(frame(line("3ogmo 500", 100, 100, 400, 160), line("4.49", 150, 200, 450, 320)), CurrencyCode.GEL)
+        val refined = PriceTagParser.refine(first, listOf(line("პური 500", 100, 100, 400, 160), line("4.49", 150, 200, 450, 320)), CurrencyCode.GEL, "ka")
+        assertTrue(refined.candidates.any { it.amount.toPlain() == "500" })
+    }
+}
+
+/**
+ * The digits-only list is for the price's own crop; tags and photos in other digit systems are read
+ * as before, whole, without it (design §14).
+ */
+class OtherDigitSystemsTest {
+    @Test
+    fun burmeseAndArabicIndicTagsStillParse() {
+        assertEquals("1000 ကျပ်", Digits.normalize("၁၀၀၀ ကျပ်"))
+        assertEquals(listOf("1000"), AmountParser.findNumbers(Digits.normalize("၁၀၀၀ ကျပ်")).map { it.amount.toPlain() })
+        val burmese = PriceTagParser.parse(frame(line("နို့", 100, 100, 300, 150), line("၁၀၀၀ ကျပ်", 150, 180, 450, 300)), CurrencyCode("MMK"))
+        assertEquals("1000", burmese.price!!.amount.toPlain())
+        assertEquals("MMK", burmese.price!!.currency?.code)
+        val arabic = PriceTagParser.parse(frame(line("حليب طازج", 100, 100, 500, 150), line("٢٥٫٩٠ ر.س", 150, 180, 450, 300)), CurrencyCode("SAR"))
+        assertEquals("25.9", arabic.price!!.amount.toPlain())
+        // Those digits aren't on the price crop's list; they never need to be.
+        assertTrue("၁٢".none { it in PriceTagParser.priceCharacters(CurrencyCode("MMK")) })
+    }
+}
+
+class StabilizerWithOutlinesTest {
+    @Test
+    fun theAimedTagLocksAfterThreeFrames() {
+        val lines = listOf(line("Milk 1 L", 60, 300, 420, 350), line("\$2.49", 100, 380, 380, 480), line("Bread 500 g", 560, 280, 940, 330), line("\$3.99", 600, 360, 900, 540))
+        val milk = TagQuad.of(listOf(40f to 270f, 460f to 270f, 460f to 510f, 40f to 510f))
+        fun seen(outline: Boolean) = PriceTagParser.parse(OcrFrame(lines, 1000, 1000, tagQuads = if (outline) listOf(milk) else emptyList()), CurrencyCode.USD, strict = true)
+        val s = PriceStabilizer(3)
+        assertNull(s.offer(seen(true)))
+        assertNull(s.offer(seen(true)))
+        assertEquals("2.49", s.offer(seen(true))!!.price!!.amount.toPlain())
+        // A frame where the outline is missed reads the whole view again; it doesn't re-announce.
+        assertNull(s.offer(seen(false)))
+        assertNull(s.offer(seen(true)))
     }
 }
 
