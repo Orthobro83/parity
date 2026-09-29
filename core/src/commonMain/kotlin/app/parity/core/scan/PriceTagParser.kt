@@ -344,7 +344,12 @@ object PriceTagParser {
         if (top != null && promo.isPromo) {
             // On a promotion tag with two prices, the lower one is what you pay now.
             // The old price is often printed small and without a currency sign, so the bar is low.
-            val pair = pool.firstOrNull { !it.isPerUnit && it.amount.compareTo(top.amount) != 0 && it.score >= top.score * 0.25 }
+            // A bare "2" next to "2X$1.50" is the deal quantity, not a previous price. Old prices still
+            // need no currency sign, but they are written as money (12.49), not as a one-digit count.
+            val pair = pool.firstOrNull {
+                !it.isPerUnit && it.amount.compareTo(top.amount) != 0 && it.score >= top.score * 0.25 &&
+                    looksLikePrice(it, localDecimals)
+            }
             if (pair != null) {
                 val low = if (pair.amount < top.amount) pair else top
                 val high = if (low === pair) top else pair

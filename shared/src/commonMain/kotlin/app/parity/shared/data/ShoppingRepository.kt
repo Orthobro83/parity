@@ -152,6 +152,31 @@ class ShoppingRepository(private val db: ParityDatabase) {
         products.get(productId)?.let { products.upsert(it.copy(userEditedName = name.trim().ifEmpty { null })) }
     }
 
+    /**
+     * The printed name an AI reading (or a later correction) settled on. A name the shopper already
+     * typed is left as they typed it. An exact match already saved in this store is reused so the
+     * sighting joins that product; otherwise this product is retitled and translated again.
+     */
+    suspend fun adoptPrintedName(productId: String, printed: String): ProductEntity? {
+        val product = products.get(productId) ?: return null
+        if (product.userEditedName != null) return product
+        val trimmed = printed.trim()
+        val normalized = Names.normalize(trimmed).takeIf { it.length >= 3 }
+        if (normalized != null && product.normalizedName != normalized) {
+            products.byName(normalized, product.storeId)?.takeIf { it.id != product.id }?.let { return it }
+        }
+        if (product.originalName == trimmed) return product
+        val updated = product.copy(
+            originalName = trimmed.ifEmpty { null },
+            normalizedName = normalized,
+            originalLang = null,
+            translatedName = null,
+            translatedLang = null,
+        )
+        products.upsert(updated)
+        return updated
+    }
+
     // --- Observations (design §6, §9) -------------------------------------------------------------
 
     /**

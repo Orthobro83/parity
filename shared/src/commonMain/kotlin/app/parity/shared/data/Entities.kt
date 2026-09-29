@@ -26,6 +26,16 @@ data class SettingsEntity(
     @ColumnInfo(defaultValue = "1") val translateOnline: Boolean = true,
     /** The offline pack last downloaded by itself on arriving in a country, as "ka>en" (v3). */
     val autoPack: String? = null,
+    /** Unused since the AI button replaced this switch. Kept so v4 databases still open. */
+    @ColumnInfo(defaultValue = "0") val aiEnabled: Boolean = false,
+    /** SPACEXAI, OPENAI or CUSTOM. */
+    @ColumnInfo(defaultValue = "'SPACEXAI'") val aiPreset: String = "SPACEXAI",
+    /** Custom service base URL, such as https://example.com/v1. Unused by the built-in presets. */
+    val aiBaseUrl: String? = null,
+    /** Model name for OpenAI or a custom service. SpaceXAI always uses grok-4.7. */
+    val aiModel: String? = null,
+    /** Bearer key for [aiPreset]. Left out of backups, like [rateApiKey]. */
+    val aiApiKey: String? = null,
 )
 
 @Serializable

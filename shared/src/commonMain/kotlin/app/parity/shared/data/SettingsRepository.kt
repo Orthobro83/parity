@@ -22,6 +22,17 @@ data class Settings(
     val translateOnline: Boolean = true,
     /** The offline pack last downloaded by itself on arriving in a country ("ka>en"). */
     val autoPack: String? = null,
+    /**
+     * Unused. Sending a label is the AI button on the price card, not this switch.
+     * The column stays so databases created with it still open.
+     */
+    val aiEnabled: Boolean = false,
+    /** SPACEXAI, OPENAI or CUSTOM. */
+    val aiPreset: String = "SPACEXAI",
+    val aiBaseUrl: String? = null,
+    val aiModel: String? = null,
+    /** Not included in backups. */
+    val aiApiKey: String? = null,
 ) {
     /** Manual location wins over detection until cleared. */
     val country: String? get() = manualCountry ?: detectedCountry
@@ -57,6 +68,11 @@ class SettingsRepository(private val dao: SettingsDao) {
         onboarded = onboarded,
         translateOnline = translateOnline,
         autoPack = autoPack,
+        aiEnabled = aiEnabled,
+        aiPreset = aiPreset,
+        aiBaseUrl = aiBaseUrl,
+        aiModel = aiModel,
+        aiApiKey = aiApiKey,
     )
 
     private fun Settings.toEntity() = SettingsEntity(
@@ -71,5 +87,10 @@ class SettingsRepository(private val dao: SettingsDao) {
         onboarded = onboarded,
         translateOnline = translateOnline,
         autoPack = autoPack,
+        aiEnabled = aiEnabled,
+        aiPreset = aiPreset,
+        aiBaseUrl = aiBaseUrl,
+        aiModel = aiModel,
+        aiApiKey = aiApiKey,
     )
 }

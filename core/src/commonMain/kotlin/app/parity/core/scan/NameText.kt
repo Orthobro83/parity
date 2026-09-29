@@ -91,6 +91,20 @@ object NameText {
      * inside it but letters, vowel signs and an apostrophe, hyphen or dot ("Coca-Cola", "St.").
      * OCR junk ("A @s @a Ma QR 0ป", "B8") has none.
      */
+    /**
+     * Worth sending to a translator. A chopped banner ("OFE") or a smashed package imprint
+     * ("NubeBlancaCentroamerica") is not a product name, and translating it invents one.
+     */
+    fun worthTranslating(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.length < 4 || Advertising.isAdvertising(trimmed)) return false
+        val words = trimmed.split(Regex("\\s+")).filter { it.any(Char::isLetter) }
+        if (words.size >= 2) return true
+        val word = words.singleOrNull() ?: return false
+        if (word.length >= 14 && word.any(Char::isLowerCase) && word.any(Char::isUpperCase)) return false
+        return word.length >= 5
+    }
+
     fun hasWord(text: String): Boolean = text.split(Regex("\\s+")).any { raw ->
         val word = raw.trim { !it.isLetter() }
         letterWeight(word) >= 3 && word.all { it.isLetter() || it.category.let { c -> c == CharCategory.NON_SPACING_MARK || c == CharCategory.COMBINING_SPACING_MARK } || it in "'’-." }

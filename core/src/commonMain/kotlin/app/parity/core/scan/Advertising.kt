@@ -87,8 +87,20 @@ internal object Advertising {
 
     fun hasQuantity(text: String): Boolean = quantity.containsMatchIn(Digits.normalize(text))
 
+    /**
+     * A single chopped token of a banner word ("OFE" from "OFERTA"). The whole word is already
+     * caught by [share]; a fragment is not, and was being kept as the product name.
+     */
+    fun isChoppedBanner(text: String): Boolean {
+        val words = text.lowercase().split(WORD_BREAK).map(::plain).filter { it.length >= 2 && it !in filler }
+        if (words.size != 1) return false
+        val word = words[0]
+        if (word.length !in 3..6) return false
+        return marketing.any { banner -> banner.startsWith(word) && banner.length - word.length >= 2 }
+    }
+
     /** Mostly marketing and no quantity: a banner or a slogan, not a product's name. */
-    fun isAdvertising(text: String): Boolean = share(text) > 0.5 && !hasQuantity(text)
+    fun isAdvertising(text: String): Boolean = (share(text) > 0.5 || isChoppedBanner(text)) && !hasQuantity(text)
 
     /** Nothing but units, weights, prices and currencies ("წონა 1 კგ", "each", "per kg", "ราคา", "บาท"): not a name. */
     fun isUnitsOnly(text: String): Boolean {

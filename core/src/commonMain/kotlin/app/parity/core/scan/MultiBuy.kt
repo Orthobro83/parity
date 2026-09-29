@@ -154,6 +154,15 @@ internal object MultiBuyDetector {
     private val forThePriceOf = Regex("$N\\s?(?:for|pour|für|по цене|за цену|по ціні)\\s?$N(?![\\d.,%])")
     private val takePay = Regex("(?<![\\d.,])([2-6])\\s?[x×]\\s?([1-5])(?![\\d.,%])")
 
+    /**
+     * Central American shelf form "2X$5.95" / "2x$6.50": N items for that amount in total.
+     * "2x1" has no currency sign and stays a buy-N-pay-M deal ([takePay]). "34X48" is a size.
+     */
+    private val timesMoney = Regex("(?<![\\d.,])(\\d{1,2})\\s?[x×]\\s?([$€£¥₩₹₱₡₲₴₸₺₼₾₽฿])\\s?(\\d{1,4}(?:[.,]\\d{1,2})?)", RegexOption.IGNORE_CASE)
+    private val datedLine = Regex("\\d{1,2}\\s?[/.-]\\s?\\d{1,2}\\s?[/.-]\\s?\\d{2,4}")
+    private val dimensionLine = Regex("\\d{2,}\\s?[x×]\\s?\\d{2,}")
+    private val currencySign = Regex("[$€£¥₩₹₱₡₲₴₸₺₼₾₽฿]")
+
     // Second unit discounted: "2nd at -50%", "-50% on the second", "მე-2 -30%", "второй товар -50%".
     private val secondWords = "2nd|second|მე-?2|მეორე|второй|2-й|2ème|zweite|第二件|2つ目|2点目|두 번째|ชิ้นที่\\s?2|الثاني|השני"
     private val secondUnit = Regex("(?:$secondWords)\\D{0,24}?(\\d{1,3})\\s?%")
@@ -186,6 +195,24 @@ internal object MultiBuyDetector {
     fun detect(lines: List<OcrLine>, candidates: List<PriceCandidate>, localDecimals: Int = 2): MultiBuyMatch? {
         for ((index, line) in lines.withIndex()) {
             val lower = " " + line.text.lowercase() + " "
+
+            timesMoney.find(line.text)?.let { m ->
+                val quantity = m.groupValues[1].toIntOrNull() ?: return@let
+                if (quantity !in 2..12) return@let
+                val amount = parseDecimal(m.groupValues[3].replace(',', '.')) ?: return@let
+                val candidate = candidates.firstOrNull {
+                    onLine(it, line) && it.amount.compareTo(amount) == 0 && it.amount.compareTo(BigDecimal.fromInt(quantity)) != 0
+                } ?: return@let
+                return MultiBuyMatch(
+                    quantity, candidate, MultiBuyOffer.Hint.TOTAL,
+                    MultiBuyOffer.bundle(quantity, amount), setOf(index), explicit = true,
+                )
+            }
+
+            // "DESDE: 02/09/2026" and "34X48" are a date and a size, not "buy 2" or "2 for 4".
+            val hasCurrency = currencySign.containsMatchIn(line.text)
+            if (!hasCurrency && datedLine.containsMatchIn(lower)) continue
+            if (!hasCurrency && dimensionLine.containsMatchIn(lower) && !takePay.containsMatchIn(lower)) continue
 
             fixedOffer(lower)?.let { offer -> return MultiBuyMatch(offer.quantity, null, MultiBuyOffer.Hint.NONE, offer, setOf(index)) }
 

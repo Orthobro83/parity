@@ -46,6 +46,7 @@ import app.parity.shared.app.AppGraph
 import app.parity.shared.data.RestoreMode
 import app.parity.shared.data.Settings
 import app.parity.shared.rates.RateProviderId
+import app.parity.shared.translate.AiPreset
 import app.parity.shared.ui.components.PillButton
 import app.parity.shared.ui.components.SectionHeader
 import app.parity.shared.ui.formatAge
@@ -67,6 +68,10 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
     LaunchedEffect(Unit) { controller.refreshOfflinePacks() }
     var picker by remember { mutableStateOf<Picker?>(null) }
     var apiKey by remember(settings.rateProvider) { mutableStateOf(settings.rateApiKey ?: "") }
+    var aiKey by remember(settings.aiApiKey) { mutableStateOf(settings.aiApiKey ?: "") }
+    var aiUrl by remember(settings.aiBaseUrl) { mutableStateOf(settings.aiBaseUrl ?: "") }
+    var aiModel by remember(settings.aiModel) { mutableStateOf(settings.aiModel ?: "") }
+    val aiPreset = AiPreset.fromName(settings.aiPreset)
     val c = Parity.colors
 
     LaunchedEffect(settings.baseCurrency, settings.localCurrency, settings.rateProvider) { controller.refreshRate() }
@@ -142,6 +147,82 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
                 val name = Languages.find(pack)?.englishName ?: pack
                 SettingRow("Remove $name offline pack", "Frees about 30 MB; $name is then translated online") { controller.removeOfflinePack(pack) }
             }
+        }
+
+        SectionHeader("AI reading")
+        Group {
+            Text(
+                "AI is on every price, whether or not the phone's reading looks finished. Nothing is sent until you tap it. The answer replaces that reading. Tap the check if it's right — that's the only time this phone remembers the correction.",
+                style = Parity.type.caption, color = c.textSecondary,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+            AiPreset.entries.forEach { preset ->
+                val selected = preset == aiPreset
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { controller.setAiPreset(preset.name) }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                        contentDescription = null, tint = if (selected) c.accent else c.textSecondary,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(preset.label, style = Parity.type.body)
+                        Text(
+                            when (preset) {
+                                AiPreset.SPACEXAI -> "Grok, at api.x.ai. Model grok-4.7."
+                                AiPreset.OPENAI -> "ChatGPT, at api.openai.com."
+                                AiPreset.CUSTOM -> "Any service that speaks the OpenAI chat format."
+                            },
+                            style = Parity.type.caption, color = c.textSecondary,
+                        )
+                    }
+                }
+            }
+            if (aiPreset == AiPreset.CUSTOM) {
+                OutlinedTextField(
+                    value = aiUrl,
+                    onValueChange = { aiUrl = it },
+                    label = { Text("Address") },
+                    placeholder = { Text("https://example.com/v1") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(18.dp),
+                    colors = parityTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            if (aiPreset == AiPreset.OPENAI || aiPreset == AiPreset.CUSTOM) {
+                OutlinedTextField(
+                    value = aiModel,
+                    onValueChange = { aiModel = it },
+                    label = { Text("Model name") },
+                    placeholder = { Text(if (aiPreset == AiPreset.OPENAI) "gpt-4o" else "model name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(18.dp),
+                    colors = parityTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            OutlinedTextField(
+                value = aiKey,
+                onValueChange = { aiKey = it },
+                label = { Text("API key") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                shape = RoundedCornerShape(18.dp),
+                colors = parityTextFieldColors(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton("Save", { controller.saveAi(aiKey, aiUrl, aiModel) }, primary = false)
+                PillButton("Test", { controller.saveAi(aiKey, aiUrl, aiModel, test = true) }, primary = false)
+            }
+            Text(
+                "A confirmed name is remembered on this phone and used on later scans. Tesseract is given those words. ML Kit has no word list, so a line it keeps misreading is replaced after the same correction is confirmed twice. Neither model is retrained. The key stays on this phone and is left out of backups.",
+                style = Parity.type.caption, color = c.textSecondary,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
         }
 
         SectionHeader("Exchange rates")
@@ -231,7 +312,7 @@ fun SettingsScreen(graph: AppGraph, settings: Settings) {
                 Text("Parity ${graph.appVersion}", style = Parity.type.body)
                 Text("Source Sans 3 (SIL Open Font License). Tesseract language data (Apache 2.0).", style = Parity.type.caption, color = c.textSecondary)
                 Text(
-                    "Everything stays on this phone. The network is only used for exchange rates, text readers and translation packs, and product names when translating online.",
+                    "The network is used for exchange rates, text readers, translation packs, and product names when translating online. Tapping AI on a price sends that label to the service you set up above. Nothing is sent until you tap it.",
                     style = Parity.type.caption, color = c.textSecondary,
                 )
             }

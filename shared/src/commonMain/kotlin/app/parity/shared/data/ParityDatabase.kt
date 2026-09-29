@@ -16,10 +16,14 @@ import androidx.sqlite.execSQL
         ShoppingListEntity::class, ShoppingListItemEntity::class, CategoryOverrideEntity::class,
         RateCacheEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
-    // v2: multi-buy deals on observations, cart lines and purchase lines. v3: translation settings.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3, spec = RetryFailedTranslations::class)],
+    // v2: multi-buy deals. v3: translation settings. v4: optional AI reader (key, preset, URL, model).
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3, spec = RetryFailedTranslations::class),
+        AutoMigration(from = 3, to = 4),
+    ],
 )
 @ConstructedBy(ParityDatabaseConstructor::class)
 abstract class ParityDatabase : RoomDatabase() {

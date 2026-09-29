@@ -64,6 +64,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -366,6 +367,31 @@ class CameraScannerImpl(
     }
 
     private fun OcrLine.moved(dx: Int, dy: Int) = copy(box = Box(box.left + dx, box.top + dy, box.right + dx, box.bottom + dy))
+
+    override suspend fun jpegOf(frameId: Long, region: Box): ByteArray? = withContext(Dispatchers.Default) {
+        val (crop, _, _) = crop(frameId, region) ?: return@withContext null
+        try {
+            val fitted = scaledToFit(crop, 1280)
+            val out = ByteArrayOutputStream()
+            val wrote = fitted.compress(Bitmap.CompressFormat.JPEG, 70, out)
+            if (fitted !== crop && !fitted.isRecycled) fitted.recycle()
+            out.toByteArray().takeIf { wrote && it.isNotEmpty() }
+        } finally {
+            if (!crop.isRecycled) crop.recycle()
+        }
+    }
+
+    override suspend fun loadReadingNotes(): String? = withContext(Dispatchers.IO) {
+        File(context.filesDir, "ocr-lessons.txt").takeIf { it.isFile }?.readText()
+    }
+
+    override suspend fun saveReadingNotes(text: String) {
+        withContext(Dispatchers.IO) { File(context.filesDir, "ocr-lessons.txt").writeText(text) }
+    }
+
+    override suspend fun noteReaderWords(words: List<String>) {
+        tesseract.noteUserWords(words)
+    }
 
     override suspend fun scanImage(bytes: ByteArray): OcrFrame? = withContext(Dispatchers.Default) {
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext null

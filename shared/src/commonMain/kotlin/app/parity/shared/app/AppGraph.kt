@@ -9,6 +9,7 @@ import app.parity.shared.data.ShoppingRepository
 import app.parity.shared.platform.Platform
 import app.parity.shared.rates.RatesRepository
 import app.parity.shared.translate.OnlineTranslator
+import app.parity.shared.translate.TagInterpreter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +27,7 @@ class AppGraph(val platform: Platform, db: ParityDatabase, val appVersion: Strin
     val settingsRepository = SettingsRepository(db.settings())
     val rates = RatesRepository(db.rates())
     val onlineTranslator = OnlineTranslator()
+    val tagInterpreter = TagInterpreter()
     val shopping = ShoppingRepository(db)
     val lists = ListRepository(db)
     val backup = BackupService(db, appVersion)

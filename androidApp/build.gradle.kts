@@ -20,8 +20,8 @@ android {
         applicationId = "app.parity"
         minSdk = 26
         targetSdk = 37
-        versionCode = 8
-        versionName = "0.3.0-beta.6"
+        versionCode = 9
+        versionName = "0.3.0-beta.7"
     }
 
     // One APK per CPU type: ML Kit, translation and Tesseract ship large native libraries, so a

@@ -2,6 +2,7 @@ package app.parity.shared.app
 
 import app.parity.core.fx.FxIndicator
 import app.parity.core.fx.FxRate
+import app.parity.core.money.Currencies
 import app.parity.core.money.CurrencyCode
 import app.parity.core.money.Languages
 import app.parity.core.money.MoneyFormat
@@ -9,11 +10,13 @@ import app.parity.core.money.decimal
 import app.parity.core.money.divideMoney
 import app.parity.core.money.parseDecimal
 import app.parity.core.money.toPlain
+import app.parity.core.scan.AiTagReading
 import app.parity.core.scan.Box
 import app.parity.core.scan.LabelReading
 import app.parity.core.scan.MultiBuyOffer
 import app.parity.core.scan.NameText
 import app.parity.core.scan.OcrFrame
+import app.parity.core.scan.OcrMemory
 import app.parity.core.scan.OcrLine
 import app.parity.core.scan.ParsedTag
 import app.parity.core.scan.PriceCandidate
@@ -27,6 +30,7 @@ import app.parity.shared.data.CartItem
 import app.parity.shared.data.PreviousSighting
 import app.parity.shared.data.ProductEntity
 import app.parity.shared.data.Settings
+import app.parity.shared.translate.AiEndpoint
 import app.parity.shared.util.now
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import kotlinx.coroutines.Dispatchers
@@ -90,9 +94,22 @@ data class ScanCard(
     val readerMissing: Boolean = false,
     /** From a photo, the shutter or typed in: the live camera doesn't replace it. */
     val pinned: Boolean = false,
+    /** What the on-device reader printed, kept so a confirmed AI reading can be learned against it. */
+    val deviceName: String? = null,
+    /** A tap on AI is in flight. The rest of the card stays usable. */
+    val aiBusy: Boolean = false,
+    /** An AI reading has replaced the on-device one. */
+    val aiReplaced: Boolean = false,
+    /** The shopper marked that AI reading right. A second tap does not learn it again. */
+    val aiConfirmed: Boolean = false,
+    /** Store chrome from the AI reading. Learned only with the checkmark, and only if it was on the crop. */
+    val aiChrome: List<String> = emptyList(),
 ) {
     val basePrice: BigDecimal? get() = rate?.localToBase(localPrice)
 }
+
+/** A cropped label and the text the phone read on that same crop. */
+private class LabelCrop(val ocr: String, val jpeg: ByteArray)
 
 /** The tag the live camera is reading, as outlined in the frame's pixels (design §6.1). */
 data class Aim(val quad: TagQuad, val frameWidth: Int, val frameHeight: Int)
@@ -118,9 +135,19 @@ class HomeController(private val graph: AppGraph) {
     private val stabilizer = PriceStabilizer(requiredFrames = 3)
     /** The store's own slogans and name, learnt from tag after tag this session (design §6.2). */
     private val storePhrases = StorePhrases()
+    /**
+     * Misread lines and confirmed words kept on this phone. Applied before a tag is parsed.
+     * The recognizers' weights are not changed: ML Kit has no word list, and Tesseract is handed
+     * the words ([app.parity.shared.platform.CameraScanner.noteReaderWords]).
+     */
+    private val ocrMemory = OcrMemory()
     private var emptyFrames = 0
     private var cardCounter = 0L
     private var enrichJob: Job? = null
+    /** The shopper's tap on AI. Not started by the scan, and cancelled when the card goes away. */
+    private var aiJob: Job? = null
+    /** Bumped when that tap is dropped, so a late reply cannot land on the next card. */
+    private var aiToken = 0
 
     private val _card = MutableStateFlow<ScanCard?>(null)
     val card: StateFlow<ScanCard?> = _card
@@ -163,6 +190,11 @@ class HomeController(private val graph: AppGraph) {
 
     init {
         scope.launch(Dispatchers.Default) {
+            runCatching { graph.platform.camera.loadReadingNotes() }.getOrNull()?.let { notes ->
+                ocrMemory.restore(notes)
+                ocrMemory.chrome.forEach(storePhrases::learn)
+                if (ocrMemory.userWords.isNotEmpty()) runCatching { graph.platform.camera.noteReaderWords(ocrMemory.userWords) }
+            }
             frames.collect { frame -> process(frame) }
         }
         // Read labels here with the right recognizer, and fetch the text reader for scripts that need
@@ -202,7 +234,7 @@ class HomeController(private val graph: AppGraph) {
         }
         val settings = graph.settings.value ?: return
         // Strict: only numbers written like shelf prices, so random text in view makes no card.
-        val tag = PriceTagParser.parse(frame, settings.localCurrency, strict = true, storePhrases = storePhrases.known)
+        val tag = PriceTagParser.parse(ocrMemory.apply(frame), settings.localCurrency, strict = true, storePhrases = storePhrases.known)
         _aim.value = tag.tagQuad?.let { Aim(it, frame.width, frame.height) }
         if (tag.price == null) {
             // Nothing price-like for a while: forget the last tag so re-scanning it shows the card again.
@@ -221,6 +253,8 @@ class HomeController(private val graph: AppGraph) {
     private fun show(tag: ParsedTag, settings: Settings, live: Boolean = false) {
         val price = tag.price ?: return
         enrichJob?.cancel()
+        aiToken++
+        aiJob?.cancel()
         // A currency printed on the tag wins over the local one.
         val currency = price.currency ?: settings.localCurrency
         val card = ScanCard(
@@ -258,6 +292,31 @@ class HomeController(private val graph: AppGraph) {
     }
 
     /**
+     * Once the shopper has asked AI to replace this card, a late on-device pass must not put the
+     * old price or name back. The sighting id and the rate still come from that pass.
+     */
+    private fun ScanCard.keepingAiReading(next: ScanCard): ScanCard {
+        if (!aiReplaced) return next
+        return next.copy(
+            localPrice = localPrice,
+            regularPrice = regularPrice,
+            isPromo = isPromo,
+            multiBuy = multiBuy,
+            alternatives = alternatives,
+            originalName = originalName,
+            name = name,
+            nameStatus = nameStatus,
+            translation = translation,
+            translationFrom = translationFrom,
+            deviceName = deviceName,
+            aiBusy = aiBusy,
+            aiReplaced = aiReplaced,
+            aiConfirmed = aiConfirmed,
+            aiChrome = aiChrome,
+        )
+    }
+
+    /**
      * Rate, name (Tesseract for scripts ML Kit can't read), product identity, ▲/▼, translation.
      * [knownName] is a name already read for this card, which is kept rather than read again.
      */
@@ -288,25 +347,29 @@ class HomeController(private val graph: AppGraph) {
                 if (better.differsFrom(tag)) update(cardId) { card ->
                     // Keep a price the shopper picked by hand; otherwise take the better reading.
                     val priceUntouched = card.localPrice.compareTo(tag.price?.amount ?: card.localPrice) == 0
-                    card.copy(
-                        localPrice = if (priceUntouched) better.price?.amount ?: card.localPrice else card.localPrice,
-                        regularPrice = better.regularPrice ?: card.regularPrice,
-                        // A sale either pass saw stands (the script pass may not read a banner the first
-                        // pass did), unless the script pass found it was a multi-buy deal's wording.
-                        isPromo = if (better.multiBuy != null) better.isPromo else better.isPromo || card.isPromo,
-                        multiBuy = card.multiBuy ?: better.multiBuy,
-                        alternatives = better.alternatives.map { it.amount },
+                    card.keepingAiReading(
+                        card.copy(
+                            localPrice = if (priceUntouched) better.price?.amount ?: card.localPrice else card.localPrice,
+                            regularPrice = better.regularPrice ?: card.regularPrice,
+                            // A sale either pass saw stands (the script pass may not read a banner the first
+                            // pass did), unless the script pass found it was a multi-buy deal's wording.
+                            isPromo = if (better.multiBuy != null) better.isPromo else better.isPromo || card.isPromo,
+                            multiBuy = card.multiBuy ?: better.multiBuy,
+                            alternatives = better.alternatives.map { it.amount },
+                        ),
                     )
                 }
             }
         }
         val name = async {
             (knownName ?: source.await()?.let { resolveName(it, refined.await(), settings, reader.await()) }).also { originalName ->
-                update(cardId) {
-                    it.copy(
-                        originalName = originalName,
-                        name = originalName,
-                        nameStatus = if (originalName == null) NameStatus.NONE else NameStatus.READING,
+                update(cardId) { card ->
+                    card.keepingAiReading(
+                        card.copy(
+                            originalName = originalName,
+                            name = originalName,
+                            nameStatus = if (originalName == null) NameStatus.NONE else NameStatus.READING,
+                        ),
                     )
                 }
             }
@@ -314,9 +377,10 @@ class HomeController(private val graph: AppGraph) {
         val rateResult = graph.rates.rate(settings.baseCurrency, local, settings.rateProvider, settings.rateApiKey)
         update(cardId) { it.copy(rate = rateResult.rate, rateStale = rateResult.stale, rateLoading = false) }
         val originalName = name.await()
-
         val store = graph.shopping.storeFor(graph.location.lastFix.value)
-        var product = graph.shopping.identifyProduct(tag.barcode, originalName, store?.id)
+        // The name on the card wins once AI has replaced it; otherwise this is the on-device reading.
+        val named = _card.value?.takeIf { it.id == cardId && it.aiReplaced }?.originalName ?: originalName
+        var product = graph.shopping.identifyProduct(tag.barcode, named, store?.id)
         val card = _card.value?.takeIf { it.id == cardId } ?: return@coroutineScope
         val observation = graph.shopping.recordObservation(
             product = product, store = store, countryCode = settings.country, localCurrency = local,
@@ -329,19 +393,23 @@ class HomeController(private val graph: AppGraph) {
             val nowRate = observation.fxRate?.let(::decimal) ?: return@run null
             FxIndicator.compute(prevRate, nowRate)
         }
-        update(cardId) {
-            it.copy(
-                observationId = observation.id, productId = product.id, indicator = indicator, previous = previous,
-                name = product.displayName ?: it.name,
-                nameStatus = if (product.displayName == null) NameStatus.NONE else it.nameStatus,
+        update(cardId) { card ->
+            card.keepingAiReading(
+                card.copy(
+                    observationId = observation.id, productId = product.id, indicator = indicator, previous = previous,
+                    name = product.displayName ?: card.name,
+                    nameStatus = if (product.displayName == null) NameStatus.NONE else card.nameStatus,
+                ),
             )
         }
 
         product = translateIfNeeded(product, settings) { status, from ->
-            update(cardId) { it.copy(translation = status, translationFrom = from) }
+            update(cardId) { card -> card.keepingAiReading(card.copy(translation = status, translationFrom = from)) }
         }
-        update(cardId) {
-            it.copy(name = product.displayName, nameStatus = if (product.displayName == null) NameStatus.NONE else NameStatus.DONE)
+        update(cardId) { card ->
+            card.keepingAiReading(
+                card.copy(name = product.displayName, nameStatus = if (product.displayName == null) NameStatus.NONE else NameStatus.DONE),
+            )
         }
         // A connection is back if this one went through: catch up on names scanned without one.
         if (product.translatedLang != null && now() - lastPendingRun > 2 * 60_000L) translatePending()
@@ -427,7 +495,9 @@ class HomeController(private val graph: AppGraph) {
         val price = tag.price ?: return null
         // The card already shows the price, so there's time: a budget phone takes a few seconds.
         val frame = withTimeoutOrNull(10_000) { runCatching { graph.platform.camera.capture(stillOnly = true) }.getOrNull() } ?: return null
-        val still = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency, storePhrases = storePhrases.known) }
+        val still = withContext(Dispatchers.Default) {
+            PriceTagParser.parse(ocrMemory.apply(frame), settings.localCurrency, storePhrases = storePhrases.known)
+        }
         return still.takeIf { it.price?.amount?.compareTo(price.amount) == 0 }
     }
 
@@ -460,6 +530,12 @@ class HomeController(private val graph: AppGraph) {
         if (product.userEditedName != null) return product
         // Done for this language, including names with nothing to translate.
         if (product.translatedLang == settings.language) return product
+        // A chopped banner or a smashed imprint is not a name. Translating it invents one
+        // ("OFE" became a German institute) and the card then asks for a pack it doesn't need.
+        if (!NameText.worthTranslating(original)) {
+            graph.shopping.saveTranslation(product.id, product.originalLang, null, settings.language)
+            return product.copy(translatedName = null, translatedLang = settings.language)
+        }
         if (product.originalLang == settings.language) return product
         val source = sourceLanguage(original, settings)
         if (source == null || Languages.base(source) == settings.language) {
@@ -548,6 +624,8 @@ class HomeController(private val graph: AppGraph) {
     // --- Card actions -------------------------------------------------------------------------------
 
     fun cancel() {
+        aiToken++
+        aiJob?.cancel()
         _card.value = null
     }
 
@@ -559,6 +637,8 @@ class HomeController(private val graph: AppGraph) {
         val card = _card.value ?: return
         scope.launch {
             if (card.observationId == null) withTimeoutOrNull(8_000) { enrichJob?.join() }
+            // A tap on AI that hasn't come back yet: buy the reading it returns, not the one it replaced.
+            if (aiJob?.isActive == true) withTimeoutOrNull(20_000) { aiJob?.join() }
             val current = _card.value?.takeIf { it.id == card.id } ?: card
             val observationId = current.observationId
             if (observationId == null) {
@@ -608,8 +688,10 @@ class HomeController(private val graph: AppGraph) {
 
     fun rename(name: String) {
         val card = _card.value ?: return
-        _card.value = card.copy(name = name, nameStatus = NameStatus.DONE)
-        card.productId?.let { id -> scope.launch { graph.shopping.renameProduct(id, name) } }
+        val trimmed = name.trim()
+        _card.value = card.copy(name = trimmed, nameStatus = NameStatus.DONE)
+        if (trimmed.isNotEmpty()) rememberCorrection(card.deviceName ?: card.originalName, trimmed)
+        card.productId?.let { id -> scope.launch { graph.shopping.renameProduct(id, trimmed) } }
     }
 
     /** Resolves a tag printed in another currency than the local one (design §6.1). */
@@ -619,11 +701,14 @@ class HomeController(private val graph: AppGraph) {
         val settings = graph.settings.value ?: return
         if (currency == card.localCurrency) return
         enrichJob?.cancel()
+        aiToken++
+        aiJob?.cancel()
         // The sighting was saved in the other currency; it's replaced by one in this currency.
         card.observationId?.let { id -> scope.launch { graph.shopping.deleteObservation(id) } }
         val updated = card.copy(
             localCurrency = currency, otherCurrency = card.localCurrency, rate = null, rateLoading = true,
             observationId = null, indicator = null, previous = null, nameStatus = NameStatus.READING,
+            aiBusy = false,
         )
         _card.value = updated
         enrichJob = scope.launch { enrich(updated.id, card.tag, settings, currency, live = false, knownName = card.originalName) }
@@ -684,7 +769,9 @@ class HomeController(private val graph: AppGraph) {
      * see (Persian ۱۲۰, Burmese ၁၀၀): if it finds no price, Tesseract reads the whole photo.
      */
     private suspend fun parsePhoto(frame: OcrFrame, settings: Settings): ParsedTag {
-        val tag = withContext(Dispatchers.Default) { PriceTagParser.parse(frame, settings.localCurrency, storePhrases = storePhrases.known) }
+        val tag = withContext(Dispatchers.Default) {
+            PriceTagParser.parse(ocrMemory.apply(frame), settings.localCurrency, storePhrases = storePhrases.known)
+        }
         if (tag.price != null || fastReadsLabels(settings)) return tag
         val reader = readerFor(settings) ?: return tag
         val whole = Box(0f, 0f, frame.width.toFloat(), frame.height.toFloat())
@@ -696,8 +783,262 @@ class HomeController(private val graph: AppGraph) {
         // Thai sign read as "4").
         val ownDigits = lines.filter { line -> line.text.none { it in '0'..'9' } || line.text.any { it.isDigit() && it.code >= 0x80 } }
         return withContext(Dispatchers.Default) {
-            PriceTagParser.parse(OcrFrame(ownDigits, frame.width, frame.height, frame.barcodes, frame.id), settings.localCurrency, storePhrases = storePhrases.known)
+            val rescued = ocrMemory.apply(OcrFrame(ownDigits, frame.width, frame.height, frame.barcodes, frame.id))
+            PriceTagParser.parse(rescued, settings.localCurrency, storePhrases = storePhrases.known)
         }
+    }
+
+    /**
+     * The shopper tapped AI. Sends the label crop they are looking at, whether or not the on-device
+     * reading looks finished, and replaces the card with the answer. Nothing is learned here.
+     */
+    fun askAi() {
+        val start = _card.value ?: return
+        if (start.aiBusy) return
+        val settings = graph.settings.value ?: return
+        val key = settings.aiApiKey?.takeIf { it.isNotBlank() }
+        if (key == null) {
+            graph.messages.show("Add an AI key in Settings, then tap AI again.")
+            return
+        }
+        val endpoint = AiEndpoint.resolve(settings)
+        if (endpoint == null) {
+            graph.messages.show("Add an https address and a model name in Settings.")
+            return
+        }
+        if (start.tag.frameId == 0L) {
+            graph.messages.show("There's no label photo to send. This price was typed in.")
+            return
+        }
+        val cardId = start.id
+        val tag = start.tag
+        val token = ++aiToken
+        _card.value = start.copy(
+            aiBusy = true,
+            deviceName = start.deviceName ?: start.originalName ?: start.tag.name,
+        )
+        aiJob?.cancel()
+        aiJob = scope.launch {
+            try {
+                val shot = withTimeoutOrNull(8_000) { runCatching { cropForAi(tag, settings) }.getOrNull() }
+                if (aiToken != token || _card.value?.id != cardId) return@launch
+                if (shot == null) {
+                    graph.messages.show("Couldn't photograph this label. The reading is unchanged.")
+                    return@launch
+                }
+                val reading = withTimeoutOrNull(12_000) {
+                    runCatching {
+                        graph.tagInterpreter.read(
+                            endpoint, key, shot.jpeg, settings.country,
+                            tag.price?.currency?.code ?: settings.localCurrency.code, settings.labelLanguage,
+                        )
+                    }.getOrNull()
+                }
+                if (aiToken != token || _card.value?.id != cardId) return@launch
+                if (reading == null || !applyAiReading(cardId, reading, shot.ocr)) {
+                    graph.messages.show("No AI reading came back. The reading is unchanged.")
+                    return@launch
+                }
+                // The result is on the card now. Saving it, and translating the name, can finish after.
+                update(cardId) { it.copy(aiBusy = false) }
+                withTimeoutOrNull(8_000) { enrichJob?.join() }
+                if (aiToken != token || _card.value?.id != cardId) return@launch
+                persistAiReading(cardId, settings)
+            } finally {
+                if (aiToken == token) update(cardId) { it.copy(aiBusy = false) }
+            }
+        }
+    }
+
+    /** The shopper marked the AI reading right. This is the only time that reading is remembered. */
+    fun confirmAi() {
+        val card = _card.value ?: return
+        if (!card.aiReplaced || card.aiConfirmed || card.aiBusy) return
+        _card.value = card.copy(aiConfirmed = true)
+        val seen = card.deviceName
+        val chrome = card.aiChrome
+        val productId = card.productId
+        val printed = card.originalName
+        scope.launch {
+            val edited = productId?.let { graph.shopping.product(it) }?.userEditedName
+            val confirmed = edited ?: printed.orEmpty()
+            if (confirmed.isNotBlank() || chrome.isNotEmpty()) rememberCorrection(seen, confirmed, chrome)
+            graph.messages.show("Saved for the next scan")
+        }
+    }
+
+    /** The label's own crop and the text read on it. A live frame has no photo, so a still is taken. */
+    private suspend fun cropForAi(tag: ParsedTag, settings: Settings): LabelCrop? {
+        val area = PriceTagParser.scriptArea(tag)
+        val direct = area?.let { graph.platform.camera.jpegOf(tag.frameId, it) }
+        if (direct != null) return LabelCrop(tag.lines.joinToString("\n") { it.text }, direct)
+        val frame = graph.platform.camera.capture(stillOnly = false) ?: return null
+        val parsed = withContext(Dispatchers.Default) {
+            PriceTagParser.parse(ocrMemory.apply(frame), settings.localCurrency, storePhrases = storePhrases.known)
+        }
+        // The on-device price can be the wrong digits. Send the label anyway; the shopper asked.
+        val cropArea = parsed.price?.let { PriceTagParser.scriptArea(parsed) }
+            ?: Box(0f, 0f, frame.width.toFloat(), frame.height.toFloat())
+        val jpeg = graph.platform.camera.jpegOf(frame.id, cropArea) ?: return null
+        val ocr = if (parsed.lines.isNotEmpty()) parsed.lines.joinToString("\n") { it.text }
+            else tag.lines.joinToString("\n") { it.text }
+        return LabelCrop(ocr, jpeg)
+    }
+
+    /**
+     * Puts the AI reading on the card. A price the shopper already picked by hand stays.
+     * Returns false when the answer had neither a name nor a price.
+     */
+    private fun applyAiReading(cardId: Long, reading: AiTagReading, ocr: String): Boolean {
+        var applied = false
+        update(cardId) { card ->
+            val shelf = card.tag.price
+            val priceUntouched = shelf == null || card.localPrice.compareTo(shelf.amount) == 0
+            val decimals = Currencies[card.localCurrency].decimals
+            var price = card.localPrice
+            var regular = card.regularPrice
+            var promo = card.isPromo
+            var deal = card.multiBuy
+            val amount = money(reading.amount)?.takeIf { it.signum() > 0 }
+            val was = money(reading.was)?.takeIf { it.signum() > 0 }
+            val qty = reading.quantity
+            val printed = reading.name?.trim()?.takeIf { it.length >= 2 }
+            if (priceUntouched && amount != null && qty != null && qty in 2..12 && reading.amountIs.equals("total", ignoreCase = true)) {
+                val offer = MultiBuyOffer.dealOnly(qty, amount, each = false)
+                deal = offer
+                price = offer.unitStandIn(decimals)
+                if (was != null && was.compareTo(price) > 0) {
+                    regular = was
+                    promo = true
+                } else {
+                    regular = null
+                    promo = false
+                }
+                applied = true
+            } else if (priceUntouched && amount != null && qty != null && qty in 2..12 && reading.amountIs.equals("unit", ignoreCase = true)) {
+                deal = MultiBuyOffer.each(qty, amount)
+                price = amount
+                if (was != null && was.compareTo(amount) > 0) {
+                    regular = was
+                    promo = true
+                } else {
+                    regular = null
+                    promo = reading.promo
+                }
+                applied = true
+            } else if (priceUntouched && amount != null) {
+                deal = null
+                price = amount
+                if (was != null && was.compareTo(amount) > 0) {
+                    regular = was
+                    promo = true
+                } else {
+                    regular = null
+                    promo = reading.promo
+                }
+                applied = true
+            }
+            if (printed != null) applied = true
+            if (!applied) return@update card
+            val name = printed ?: card.originalName
+            val haystack = ocr + "\n" + card.tag.lines.joinToString("\n") { it.text }
+            card.copy(
+                localPrice = price,
+                regularPrice = regular,
+                isPromo = promo,
+                multiBuy = deal,
+                originalName = name,
+                name = name,
+                nameStatus = if (name == null) NameStatus.NONE else NameStatus.DONE,
+                translation = null,
+                translationFrom = null,
+                deviceName = card.deviceName ?: card.originalName ?: card.tag.name,
+                aiReplaced = true,
+                aiConfirmed = false,
+                aiChrome = reading.chrome.map { it.trim() }.filter { phrase ->
+                    phrase.length >= 3 && haystack.contains(phrase, ignoreCase = true)
+                },
+            )
+        }
+        return _card.value?.takeIf { it.id == cardId }?.aiReplaced == true
+    }
+
+    /** Points the saved sighting at the AI price and printed name, then translates that name. */
+    private suspend fun persistAiReading(cardId: Long, settings: Settings) {
+        val card = _card.value?.takeIf { it.id == cardId && it.aiReplaced } ?: return
+        val printed = card.originalName
+        val saved = card.productId?.let { graph.shopping.product(it) }
+        // Retitle only the product this scan just created from the on-device name. A product already
+        // saved under a barcode, or one the shopper renamed, keeps the name it had.
+        val device = card.deviceName ?: card.tag.name
+        when {
+            saved == null -> Unit
+            saved.userEditedName != null -> update(cardId) { current ->
+                if (!current.aiReplaced) current
+                else current.copy(name = saved.displayName ?: current.name, nameStatus = NameStatus.DONE, translation = null)
+            }
+            !printed.isNullOrBlank() && (saved.originalName == null || saved.originalName == device || saved.originalName == printed) -> {
+                var product = graph.shopping.adoptPrintedName(saved.id, printed) ?: saved
+                product = translateIfNeeded(product, settings) { status, from ->
+                    update(cardId) { current ->
+                        if (!current.aiReplaced) current else current.copy(translation = status, translationFrom = from)
+                    }
+                }
+                update(cardId) { current ->
+                    if (!current.aiReplaced) current
+                    else current.copy(
+                        productId = product.id,
+                        name = product.displayName ?: current.name,
+                        nameStatus = if (product.displayName == null) NameStatus.NONE else NameStatus.DONE,
+                        translation = if (product.translatedLang != null) null else current.translation,
+                    )
+                }
+            }
+        }
+        val current = _card.value?.takeIf { it.id == cardId } ?: return
+        val observationId = current.observationId ?: return
+        graph.shopping.updateObservation(observationId) { obs ->
+            obs.copy(
+                productId = current.productId ?: obs.productId,
+                price = current.localPrice.toPlain(),
+                regularPrice = current.regularPrice?.toPlain(),
+                isPromo = current.isPromo,
+                promoSource = "AI",
+                multiBuyJson = current.multiBuy?.toJson(),
+            )
+        }
+        val observation = graph.shopping.observation(observationId) ?: return
+        val previous = graph.shopping.previousSighting(observation)
+        val indicator = run {
+            val prevRate = previous?.observation?.fxRate?.let(::decimal) ?: return@run null
+            val nowRate = observation.fxRate?.let(::decimal) ?: return@run null
+            FxIndicator.compute(prevRate, nowRate)
+        }
+        update(cardId) { it.copy(indicator = indicator, previous = previous, productId = observation.productId) }
+    }
+
+    /** Remembers a checked name and any store chrome, and hands new words to Tesseract. */
+    private fun rememberCorrection(seen: String?, confirmed: String, chrome: List<String> = emptyList()) {
+        val wordsBefore = ocrMemory.userWords
+        var changed = false
+        if (confirmed.isNotBlank()) changed = ocrMemory.learn(seen, confirmed) || changed
+        chrome.forEach { phrase ->
+            if (ocrMemory.learnChrome(phrase)) {
+                storePhrases.learn(phrase)
+                changed = true
+            }
+        }
+        if (changed) {
+            val snapshot = ocrMemory.snapshot()
+            scope.launch(Dispatchers.Default) { runCatching { graph.platform.camera.saveReadingNotes(snapshot) } }
+        }
+        val words = ocrMemory.userWords
+        if (words != wordsBefore) scope.launch(Dispatchers.Default) { runCatching { graph.platform.camera.noteReaderWords(words) } }
+    }
+
+    private fun money(raw: String?): BigDecimal? {
+        val cleaned = raw?.filter { it.isDigit() || it == '.' || it == ',' }?.replace(',', '.') ?: return null
+        return parseDecimal(cleaned)
     }
 
     // --- Cart (design §7) -------------------------------------------------------------------------

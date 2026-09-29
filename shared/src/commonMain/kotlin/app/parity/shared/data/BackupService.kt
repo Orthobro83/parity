@@ -96,7 +96,7 @@ class BackupService(private val db: ParityDatabase, private val appVersion: Stri
 
     /** All tables as CSV text keyed by file name, plus a manifest and the flat purchases.csv. */
     suspend fun exportFiles(): Map<String, String> {
-        val settings = db.settings().get()?.copy(rateApiKey = null) // never export secrets
+        val settings = db.settings().get()?.copy(rateApiKey = null, aiApiKey = null) // never export secrets
         val stores = db.stores().all()
         val products = db.products().all()
         val sessions = db.sessions().all()
@@ -158,8 +158,8 @@ class BackupService(private val db: ParityDatabase, private val appVersion: Stri
                 db.lists().deleteAllLists()
                 db.overrides().deleteAll()
                 contents.settings.firstOrNull()?.let { restored ->
-                    val key = db.settings().get()?.rateApiKey
-                    db.settings().upsert(restored.copy(rateApiKey = key))
+                    val kept = db.settings().get()
+                    db.settings().upsert(restored.copy(rateApiKey = kept?.rateApiKey, aiApiKey = kept?.aiApiKey))
                 }
             }
             db.stores().upsertAll(contents.stores)

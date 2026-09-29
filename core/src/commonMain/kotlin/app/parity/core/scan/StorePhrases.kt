@@ -16,6 +16,13 @@ class StorePhrases(private val minTags: Int = 3) {
     var known: Set<String> = emptySet()
         private set
 
+    /** A line the shopper or a checked AI reading said is store chrome, not a product. */
+    fun learn(text: String) {
+        val phrase = phraseOf(text)
+        if (phrase.isEmpty()) return
+        if (phrase !in known) known = known + phrase
+    }
+
     /** Notes the lines on the tag priced [priceKey] that could be names. */
     fun record(priceKey: String, lines: List<OcrLine>) {
         for (line in lines) {

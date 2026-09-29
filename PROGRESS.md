@@ -103,6 +103,14 @@ Install on a phone with USB debugging: `adb install -r androidApp/build/outputs/
       Open: on that sign, when ML Kit misses the stylised 88 but reads "ราคา" as 5101, the shutter
       still shows ฿5,101 (Tesseract also reads it as 5101, and reads the 88 as Thai letters).
 - [ ] Phone check of 0.3.0-beta.6: the Thai sign on the monitor (฿88, no junk name)
+- [x] 0.3.0-beta.7 (branch `ai-label-reading`): on-device reading keeps more of the product name,
+      reads a Central American 2X$ price as a bundle, and no longer takes a store logo, a chopped
+      slogan, a bare integer, or a date as the name, the old price, or a deal. AI is a button on
+      every price card. Nothing is sent until it's tapped; the answer replaces the reading; the
+      checkmark is the only time the phone remembers the correction. Settings take a SpaceXAI,
+      OpenAI, or custom key, left out of backups. The recognizers are not retrained. Core tests
+      pass. Not yet checked on a phone.
+- [ ] Phone check of 0.3.0-beta.7: Selectos-style tags (2X$ bundles, full names) and the AI button
 - [ ] M5 (after Phase 1): full analytics charts
 - [x] Release build: R8 keep rules for ML Kit + Tesseract, per-ABI APKs (arm64 release ≈ 59 MB); verified on emulator
 

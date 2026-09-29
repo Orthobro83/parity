@@ -33,7 +33,25 @@ class TesseractReader(private val context: Context) {
     private val downloads = Mutex()
     private var api: TessBaseAPI? = null
     private var loadedLanguages: String? = null
+    /** Words confirmed on this phone. Loaded the next time an engine starts; the models themselves stay as shipped. */
+    private var userWords: List<String> = emptyList()
     private val dataDir by lazy { File(context.filesDir, "tesseract") }
+
+    /**
+     * Remembers [words] and restarts the engine so the next read uses them. Tesseract can take a
+     * word list; doing that before [TessBaseAPI.init] is the only point it reads one. Skipped when
+     * the list has not changed, because restarting the engine is slow.
+     */
+    suspend fun noteUserWords(words: List<String>) = withContext(Dispatchers.Default) {
+        mutex.withLock {
+            if (words == userWords) return@withLock
+            userWords = words
+            writeUserWords(words)
+            api?.recycle()
+            api = null
+            loadedLanguages = null
+        }
+    }
 
     /** Lines of [bitmap] read as one block of text: a small area such as a name. */
     suspend fun readBlock(bitmap: Bitmap, languages: String, textHeight: Float? = null): List<OcrLine>? = withContext(Dispatchers.Default) {
@@ -196,6 +214,11 @@ class TesseractReader(private val context: Context) {
         loadedLanguages = null
         val started = SystemClock.elapsedRealtime()
         val engine = TessBaseAPI()
+        if (userWords.isNotEmpty()) {
+            writeUserWords(userWords, languages.split('+'))
+            // Init-only: the suffix names tessdata/<lang>.user-words, and it is read during init.
+            engine.setVariable("user_words_suffix", "user-words")
+        }
         if (!engine.init(dataDir.absolutePath, languages)) {
             Log.w(TAG, "Tesseract couldn't load $languages")
             engine.recycle()
@@ -206,6 +229,15 @@ class TesseractReader(private val context: Context) {
         api = engine
         loadedLanguages = languages
         return engine
+    }
+
+    /** One word per line, for English and every language this engine loads. */
+    private fun writeUserWords(words: List<String>, languages: List<String> = emptyList()) {
+        val dir = File(dataDir, "tessdata").apply { mkdirs() }
+        val body = words.joinToString("\n") { it.replace('\n', ' ').replace('\t', ' ').trim() }
+        (languages + "eng").map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { code ->
+            File(dir, "$code.user-words").writeText(body)
+        }
     }
 
     /**

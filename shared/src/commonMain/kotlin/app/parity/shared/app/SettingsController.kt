@@ -9,6 +9,7 @@ import app.parity.shared.data.RestoreMode
 import app.parity.shared.data.Settings
 import app.parity.shared.rates.RateProviderId
 import app.parity.shared.rates.RateResult
+import app.parity.shared.translate.AiEndpoint
 import app.parity.shared.util.now
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,6 +74,35 @@ class SettingsController(private val graph: AppGraph) {
     fun setApiKey(key: String) = update { it.copy(rateApiKey = key.trim().ifEmpty { null }) }
     fun setTrueBlack(on: Boolean) = update { it.copy(trueBlack = on) }
     fun setTranslateOnline(on: Boolean) = update { it.copy(translateOnline = on) }
+    fun setAiPreset(preset: String) = update { it.copy(aiPreset = preset) }
+
+    /** Stores the key, and the custom URL and model. [test] then checks the key with a text-only request. */
+    fun saveAi(key: String, baseUrl: String, model: String, test: Boolean = false) {
+        scope.launch {
+            graph.settingsRepository.update {
+                it.copy(
+                    aiApiKey = key.trim().ifEmpty { null },
+                    aiBaseUrl = baseUrl.trim().ifEmpty { null },
+                    aiModel = model.trim().ifEmpty { null },
+                )
+            }
+            if (!test) return@launch
+            val saved = graph.settingsRepository.current()
+            val apiKey = saved.aiApiKey
+            val endpoint = AiEndpoint.resolve(saved)
+            if (apiKey.isNullOrBlank()) {
+                graph.messages.show("Enter an API key first")
+                return@launch
+            }
+            if (endpoint == null) {
+                graph.messages.show("Add an https address and a model name")
+                return@launch
+            }
+            graph.messages.show("Testing the connection…")
+            val result = runCatching { graph.tagInterpreter.ping(endpoint, apiKey) }.getOrNull()
+            graph.messages.show(result?.detail ?: "Couldn't reach that service")
+        }
+    }
 
     fun refreshOfflinePacks() {
         scope.launch { _offlinePacks.value = runCatching { graph.platform.text.offlineLanguages() }.getOrDefault(emptySet()) }

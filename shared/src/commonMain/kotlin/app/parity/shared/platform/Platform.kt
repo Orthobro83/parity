@@ -77,6 +77,24 @@ interface CameraScanner {
     suspend fun scanImage(bytes: ByteArray): OcrFrame?
 
     /**
+     * JPEG of [region] from a still or a photo. Null for a live frame: those aren't kept, because
+     * the print is too small. Used only when a label is sent to the AI the shopper configured.
+     */
+    suspend fun jpegOf(frameId: Long, region: Box): ByteArray?
+
+    /** Corrections this phone has learned, or null when it hasn't learned any. Not part of a backup. */
+    suspend fun loadReadingNotes(): String?
+
+    /** Replaces the learned corrections. */
+    suspend fun saveReadingNotes(text: String)
+
+    /**
+     * Words from names a person or a checked reading confirmed. Tesseract loads them next time it
+     * starts. ML Kit has no word list; those corrections are applied to its text before parsing.
+     */
+    suspend fun noteReaderWords(words: List<String>)
+
+    /**
      * The shutter: takes a full-resolution photo of what the preview shows and reads it like
      * [scanImage]. Null when the camera isn't running or the photo fails. Where the camera can't
      * take stills it reads the latest preview frame instead, unless [stillOnly].

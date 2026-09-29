@@ -38,6 +38,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -219,6 +221,8 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
                         onFxDetail = { fxDetail = c },
                         onCurrency = home::chooseCurrency,
                         onDeal = { editingDeal = c },
+                        onAskAi = home::askAi,
+                        onConfirmAi = home::confirmAi,
                         labelLanguage = settings.labelLanguage,
                     )
                 }
@@ -229,7 +233,9 @@ fun HomeScreen(graph: AppGraph, settings: Settings, cameraActive: Boolean) {
         }
     }
 
-    buying?.let { c ->
+    buying?.let { snapshot ->
+        // The sheet stays open across an AI reply, so it shows the reading Buy will actually save.
+        val c = card?.takeIf { it.id == snapshot.id } ?: snapshot
         QuantitySheet(
             card = c,
             onAdd = { qty, useDeal -> home.buy(qty, useDeal); buying = null },
@@ -402,6 +408,8 @@ private fun ResultCard(
     onFxDetail: () -> Unit,
     onCurrency: (CurrencyCode) -> Unit,
     onDeal: () -> Unit,
+    onAskAi: () -> Unit,
+    onConfirmAi: () -> Unit,
     labelLanguage: String?,
 ) {
     val c = Parity.colors
@@ -425,7 +433,37 @@ private fun ResultCard(
                         }
                     }
                 }
-                card.indicator?.let { FxBadge(it, onClick = onFxDetail) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    card.indicator?.let { FxBadge(it, onClick = onFxDetail) }
+                    if (card.aiReplaced && !card.aiBusy) {
+                        if (card.aiConfirmed) {
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = "Saved for the next scan",
+                                tint = c.accent,
+                                modifier = Modifier.size(32.dp),
+                            )
+                        } else {
+                            RoundIconButton(
+                                Icons.Rounded.Check,
+                                "This AI reading is right",
+                                onConfirmAi,
+                                size = 36.dp,
+                                background = c.accent,
+                                tint = c.onAccent,
+                            )
+                        }
+                    }
+                    Chip(
+                        if (card.aiBusy) "…" else "AI",
+                        color = c.accent,
+                        selected = card.aiReplaced,
+                        onClick = if (card.aiBusy) null else onAskAi,
+                        modifier = Modifier.semantics {
+                            contentDescription = if (card.aiBusy) "Asking your AI" else "Send this label to AI"
+                        },
+                    )
+                }
             }
             card.multiBuy?.let { deal ->
                 val text = if (deal.singlePriceShown) {
@@ -457,6 +495,11 @@ private fun ResultCard(
                         Text(original, style = Parity.type.caption, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     translationNote(card, labelLanguage)?.let { Text(it, style = Parity.type.caption, color = c.textSecondary) }
+                    when {
+                        card.aiBusy -> Text("Asking your AI…", style = Parity.type.caption, color = c.textSecondary)
+                        card.aiReplaced && !card.aiConfirmed ->
+                            Text("From your AI. Tap the check if this is right.", style = Parity.type.caption, color = c.textSecondary)
+                    }
                 }
                 Icon(Icons.Rounded.Edit, contentDescription = "Edit name", tint = c.textSecondary, modifier = Modifier.padding(start = 8.dp))
             }
@@ -583,7 +626,7 @@ private fun CameraPermissionPrompt(onAllow: () -> Unit, onType: () -> Unit) {
             Text("Parity reads price tags with your camera", style = Parity.type.headline, color = Parity.colors.textPrimary)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Nothing leaves your phone. You can also type prices in by hand.",
+                "Prices stay on your phone unless you tap AI on a tag. You can also type prices in by hand.",
                 style = Parity.type.body, color = Parity.colors.textSecondary,
             )
             Spacer(Modifier.height(24.dp))
